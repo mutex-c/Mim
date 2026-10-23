@@ -13,8 +13,8 @@ const (
 	MagicNumber uint16 = 0x4D49
 	// CurrentVersion represents the protocol version
 	CurrentVersion uint8 = 0x01
-	// HeaderSize is the fixed size of the binary packet header
-	HeaderSize = 22
+	// HeaderSize is the fixed size of the binary packet header (24 Bytes, 8-byte aligned)
+	HeaderSize = 24
 
 	// Command Types
 	CmdHeartbeatPing uint16 = 0x0001
@@ -29,8 +29,10 @@ const (
 	CmdGroupMessageSend uint16 = 0x0200
 	CmdGroupMessagePush uint16 = 0x0201
 
-	CmdSyncReq  uint16 = 0x0300
-	CmdSyncResp uint16 = 0x0301
+	CmdSyncReq       uint16 = 0x0300
+	CmdSyncResp      uint16 = 0x0301
+	CmdBatchSyncReq  uint16 = 0x0302
+	CmdBatchSyncResp uint16 = 0x0303
 
 	CmdRevokeNotify uint16 = 0x0400
 	CmdReadReceipt  uint16 = 0x0401
@@ -51,16 +53,18 @@ var (
 
 const MaxPayloadSize = 10 * 1024 * 1024 // 10MB
 
-// Frame represents a complete binary transport packet
+// Frame represents an aligned 24-byte binary transport packet
+// All multi-byte fields are strictly encoded in Network Byte Order (Big-Endian)
 type Frame struct {
-	Magic    uint16
-	Version  uint8
-	Flags    uint8
-	CmdType  uint16
-	SeqID    uint64
-	Length   uint32
-	Checksum uint32
-	Payload  []byte
+	Magic    uint16 // Offset 0  (2B)
+	Version  uint8  // Offset 2  (1B)
+	Flags    uint8  // Offset 3  (1B)
+	CmdType  uint16 // Offset 4  (2B)
+	Reserved uint16 // Offset 6  (2B) -> Aligns SeqID to 8-byte boundary
+	SeqID    uint64 // Offset 8  (8B) -> Perfectly 8-byte memory aligned
+	Length   uint32 // Offset 16 (4B)
+	Checksum uint32 // Offset 20 (4B) -> CRC32 of Payload
+	Payload  []byte // Offset 24+
 }
 
 // NewFrame constructs a new Frame and automatically computes Length & Checksum
@@ -71,6 +75,7 @@ func NewFrame(cmdType uint16, seqID uint64, flags uint8, payload []byte) *Frame 
 		Version:  CurrentVersion,
 		Flags:    flags,
 		CmdType:  cmdType,
+		Reserved: 0,
 		SeqID:    seqID,
 		Length:   uint32(len(payload)),
 		Checksum: checksum,
@@ -78,7 +83,7 @@ func NewFrame(cmdType uint16, seqID uint64, flags uint8, payload []byte) *Frame 
 	}
 }
 
-// Encode serializes the Frame into wire format bytes
+// Encode serializes the Frame into wire format bytes (Network Byte Order: Big-Endian)
 func (f *Frame) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
@@ -98,19 +103,23 @@ func (f *Frame) Encode() ([]byte, error) {
 	if err := binary.Write(buf, binary.BigEndian, f.CmdType); err != nil {
 		return nil, err
 	}
-	// 5. Sequence (8B)
+	// 5. Reserved (2B)
+	if err := binary.Write(buf, binary.BigEndian, f.Reserved); err != nil {
+		return nil, err
+	}
+	// 6. Sequence ID (8B) - starts at offset 8
 	if err := binary.Write(buf, binary.BigEndian, f.SeqID); err != nil {
 		return nil, err
 	}
-	// 6. Length (4B)
+	// 7. Length (4B)
 	if err := binary.Write(buf, binary.BigEndian, f.Length); err != nil {
 		return nil, err
 	}
-	// 7. Checksum (4B)
+	// 8. Checksum (4B)
 	if err := binary.Write(buf, binary.BigEndian, f.Checksum); err != nil {
 		return nil, err
 	}
-	// 8. Payload
+	// 9. Payload
 	if len(f.Payload) > 0 {
 		buf.Write(f.Payload)
 	}
@@ -118,7 +127,7 @@ func (f *Frame) Encode() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Decode parses a binary packet from a byte slice
+// Decode parses a binary packet from a byte slice with 24-byte aligned header
 func Decode(data []byte) (*Frame, error) {
 	if len(data) < HeaderSize {
 		return nil, ErrPacketTooShort
@@ -141,6 +150,9 @@ func Decode(data []byte) (*Frame, error) {
 		return nil, err
 	}
 	if err := binary.Read(reader, binary.BigEndian, &f.CmdType); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(reader, binary.BigEndian, &f.Reserved); err != nil {
 		return nil, err
 	}
 	if err := binary.Read(reader, binary.BigEndian, &f.SeqID); err != nil {

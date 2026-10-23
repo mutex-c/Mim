@@ -1,6 +1,7 @@
 export const MAGIC_NUMBER = 0x4D49;
 export const CURRENT_VERSION = 0x01;
-export const HEADER_SIZE = 22;
+// 24 Bytes: 2B Magic + 1B Version + 1B Flags + 2B CmdType + 2B Reserved + 8B SeqID + 4B Length + 4B Checksum
+export const HEADER_SIZE = 24;
 
 export enum CmdType {
   HeartbeatPing = 0x0001,
@@ -17,6 +18,8 @@ export enum CmdType {
 
   SyncReq = 0x0300,
   SyncResp = 0x0301,
+  BatchSyncReq = 0x0302,
+  BatchSyncResp = 0x0303,
 
   RevokeNotify = 0x0400,
   ReadReceipt = 0x0401,
@@ -47,35 +50,38 @@ export interface Frame {
   version: number;
   flags: number;
   cmdType: CmdType;
+  reserved: number;
   seqId: bigint;
   length: number;
   checksum: number;
   payload: Uint8Array;
 }
 
-// Encode binary Frame into ArrayBuffer
+// Encode binary Frame into ArrayBuffer (Strict Network Byte Order: Big-Endian)
 export function encodeFrame(cmdType: CmdType, seqId: bigint, flags: number, payload: Uint8Array): ArrayBuffer {
   const length = payload.byteLength;
   const checksum = computeCRC32(payload);
   const buffer = new ArrayBuffer(HEADER_SIZE + length);
   const view = new DataView(buffer);
 
-  // 1. Magic (2B)
+  // 1. Magic (2B) - Big Endian
   view.setUint16(0, MAGIC_NUMBER, false);
   // 2. Version (1B)
   view.setUint8(2, CURRENT_VERSION);
   // 3. Flags (1B)
   view.setUint8(3, flags);
-  // 4. CmdType (2B)
+  // 4. CmdType (2B) - Big Endian
   view.setUint16(4, cmdType, false);
-  // 5. SeqID (8B)
-  view.setBigUint64(6, seqId, false);
-  // 6. Length (4B)
-  view.setUint32(14, length, false);
-  // 7. Checksum (4B)
-  view.setUint32(18, checksum, false);
+  // 5. Reserved (2B) - 8-byte alignment padding
+  view.setUint16(6, 0, false);
+  // 6. SeqID (8B) - starts at offset 8 (Memory Aligned) - Big Endian
+  view.setBigUint64(8, seqId, false);
+  // 7. Length (4B) - Big Endian
+  view.setUint32(16, length, false);
+  // 8. Checksum (4B) - Big Endian
+  view.setUint32(20, checksum, false);
 
-  // 8. Payload
+  // 9. Payload
   if (length > 0) {
     new Uint8Array(buffer, HEADER_SIZE).set(payload);
   }
@@ -83,10 +89,10 @@ export function encodeFrame(cmdType: CmdType, seqId: bigint, flags: number, payl
   return buffer;
 }
 
-// Decode ArrayBuffer into binary Frame
+// Decode ArrayBuffer into binary Frame (Strict Network Byte Order: Big-Endian)
 export function decodeFrame(buffer: ArrayBuffer): Frame {
   if (buffer.byteLength < HEADER_SIZE) {
-    throw new Error('Packet shorter than header size');
+    throw new Error('Packet shorter than 24-byte header size');
   }
 
   const view = new DataView(buffer);
@@ -98,9 +104,10 @@ export function decodeFrame(buffer: ArrayBuffer): Frame {
   const version = view.getUint8(2);
   const flags = view.getUint8(3);
   const cmdType = view.getUint16(4, false) as CmdType;
-  const seqId = view.getBigUint64(6, false);
-  const length = view.getUint32(14, false);
-  const checksum = view.getUint32(18, false);
+  const reserved = view.getUint16(6, false);
+  const seqId = view.getBigUint64(8, false); // Offset 8
+  const length = view.getUint32(16, false);
+  const checksum = view.getUint32(20, false);
 
   const payload = new Uint8Array(buffer, HEADER_SIZE, length);
   if (computeCRC32(payload) !== checksum) {
@@ -112,6 +119,7 @@ export function decodeFrame(buffer: ArrayBuffer): Frame {
     version,
     flags,
     cmdType,
+    reserved,
     seqId,
     length,
     checksum,

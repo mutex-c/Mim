@@ -43,6 +43,7 @@ func FormatSingleConvID(u1, u2 uint64) string {
 }
 
 // NextSeqID allocates a strictly monotonically increasing sequence number for a conversation
+// Monotonically increasing, gap-tolerant: Redis INCR / DB transaction failure creates gaps but preserves monotonic order
 func (s *Service) NextSeqID(convID string) uint64 {
 	s.seqMu.Lock()
 	defer s.seqMu.Unlock()
@@ -122,7 +123,7 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 			return err
 		}
 
-		// Update or Create Sender Conversation
+		// Update or Create Sender Conversation with CAS / Seq Guard to prevent reordered overwrites
 		var senderConv models.Conversation
 		tx.Where("user_id = ? AND conversation_id = ?", req.SenderID, convID).FirstOrCreate(&senderConv, models.Conversation{
 			ConversationID: convID,
@@ -130,14 +131,17 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 			TargetID:       req.ReceiverID,
 			ConvType:       req.ConvType,
 		})
-		tx.Model(&senderConv).Updates(map[string]interface{}{
-			"last_msg_id":      msg.ID,
-			"last_msg_preview": req.Content,
-			"last_msg_time":    now,
-			"last_read_seq":    seqID, // sender has read their own message
-		})
+		tx.Model(&models.Conversation{}).
+			Where("id = ? AND last_msg_seq < ?", senderConv.ID, seqID).
+			Updates(map[string]interface{}{
+				"last_msg_id":      msg.ID,
+				"last_msg_seq":     seqID,
+				"last_msg_preview": req.Content,
+				"last_msg_time":    now,
+				"last_read_seq":    seqID, // sender has read their own message
+			})
 
-		// Update or Create Receiver Conversation (if single chat)
+		// Update or Create Receiver Conversation (if single chat) with CAS / Seq Guard
 		if req.ConvType == models.ConvTypeSingle {
 			var receiverConv models.Conversation
 			tx.Where("user_id = ? AND conversation_id = ?", req.ReceiverID, convID).FirstOrCreate(&receiverConv, models.Conversation{
@@ -146,12 +150,15 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 				TargetID:       req.SenderID,
 				ConvType:       req.ConvType,
 			})
-			tx.Model(&receiverConv).Updates(map[string]interface{}{
-				"last_msg_id":      msg.ID,
-				"last_msg_preview": req.Content,
-				"last_msg_time":    now,
-				"unread_count":     gorm.Expr("unread_count + 1"),
-			})
+			tx.Model(&models.Conversation{}).
+				Where("id = ? AND last_msg_seq < ?", receiverConv.ID, seqID).
+				Updates(map[string]interface{}{
+					"last_msg_id":      msg.ID,
+					"last_msg_seq":     seqID,
+					"last_msg_preview": req.Content,
+					"last_msg_time":    now,
+					"unread_count":     gorm.Expr("unread_count + 1"),
+				})
 		}
 		return nil
 	})
@@ -160,7 +167,7 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 		return nil, err
 	}
 
-	// 5. Construct Protobuf ChatMessage & Wrap in Binary Frame
+	// 5. Construct Protobuf ChatMessage & Wrap in Aligned Binary Frame
 	protoMsg := &protocol.ChatMessage{
 		MsgId:          msg.ID,
 		ClientMsgId:    msg.ClientMsgID,
@@ -201,7 +208,25 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 	}, nil
 }
 
-// SyncMessages incrementally pulls messages after lastSeqID
+// RouteWebRTCSignal routes ephemeral WebRTC signaling (Offer/Answer/Candidate) strictly in memory
+// Ephemeral signaling is NEVER stored in mim_messages database table
+func (s *Service) RouteWebRTCSignal(signal *protocol.WebRTCSignal) error {
+	payload, err := proto.Marshal(signal)
+	if err != nil {
+		return err
+	}
+
+	frame := protocol.NewFrame(protocol.CmdWebRTCSignal, 0, 0, payload)
+	encoded, err := frame.Encode()
+	if err != nil {
+		return err
+	}
+
+	s.hub.SendToUser(signal.ToUserId, encoded)
+	return nil
+}
+
+// SyncMessages incrementally pulls messages after lastSeqID (Monotonic gap-tolerant query)
 func (s *Service) SyncMessages(convID string, lastSeqID uint64, limit int) (*protocol.SyncResponse, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
@@ -244,6 +269,24 @@ func (s *Service) SyncMessages(convID string, lastSeqID uint64, limit int) (*pro
 	return resp, nil
 }
 
+type ConvSyncCursor struct {
+	ConversationID string
+	LastSeqID      uint64
+}
+
+// BatchSyncMessages fetches incremental messages across multiple conversations in a single roundtrip
+func (s *Service) BatchSyncMessages(cursors []ConvSyncCursor, perConvLimit int) (map[string]*protocol.SyncResponse, error) {
+	results := make(map[string]*protocol.SyncResponse)
+	for _, c := range cursors {
+		resp, err := s.SyncMessages(c.ConversationID, c.LastSeqID, perConvLimit)
+		if err != nil {
+			return nil, err
+		}
+		results[c.ConversationID] = resp
+	}
+	return results, nil
+}
+
 // RevokeMessage handles 2-minute time window message revocation
 func (s *Service) RevokeMessage(userID, msgID uint64) error {
 	var msg models.Message
@@ -267,9 +310,9 @@ func (s *Service) RevokeMessage(userID, msgID uint64) error {
 			return err
 		}
 
-		// Update conversation preview
+		// Update conversation preview with Seq Guard
 		tx.Model(&models.Conversation{}).
-			Where("conversation_id = ?", msg.ConversationID).
+			Where("conversation_id = ? AND last_msg_seq <= ?", msg.ConversationID, msg.SeqID).
 			Update("last_msg_preview", "你撤回了一条消息")
 
 		// Push revoke notify via hub

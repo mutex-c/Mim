@@ -45,9 +45,9 @@ func ComputeHash(data []byte) string {
 }
 
 // CheckFileExists checks if a file with the given SHA-256 already exists (Instant Upload / 秒传)
-func (s *Service) CheckFileExists(hash string) (*models.FileRecord, bool, error) {
+func (s *Service) CheckFileExists(hash string, size uint64) (*models.FileRecord, bool, error) {
 	var record models.FileRecord
-	err := s.db.Where("file_hash = ?", hash).First(&record).Error
+	err := s.db.Where("file_hash = ? AND file_size = ?", hash, size).First(&record).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, false, nil
@@ -57,30 +57,19 @@ func (s *Service) CheckFileExists(hash string) (*models.FileRecord, bool, error)
 	return &record, true, nil
 }
 
-// SaveFile saves uploaded file bytes or reuses existing file record if hash matches
+// SaveFile saves uploaded file bytes or reuses existing file record if hash matches (Instant Upload)
 func (s *Service) SaveFile(uploaderID uint64, fileName, fileType string, data []byte) (*models.FileRecord, error) {
 	hash := ComputeHash(data)
+	size := uint64(len(data))
 
-	// 1. Check if hash exists (Instant Upload)
-	if existing, found, _ := s.CheckFileExists(hash); found {
-		// Create a reference record for this uploader
-		newRecord := models.FileRecord{
-			FileHash:    existing.FileHash,
-			FileName:    fileName,
-			FileSize:    existing.FileSize,
-			FileType:    fileType,
-			StoragePath: existing.StoragePath,
-			UploaderID:  uploaderID,
-		}
-		if err := s.db.Create(&newRecord).Error; err != nil {
-			return nil, err
-		}
-		return &newRecord, nil
+	// 1. Check if hash + size exists (Instant Upload / 秒传)
+	if existing, found, _ := s.CheckFileExists(hash, size); found {
+		return existing, nil
 	}
 
 	// 2. Physical write to storage
 	ext := filepath.Ext(fileName)
-	targetName := fmt.Sprintf("%s%s", hash, ext)
+	targetName := fmt.Sprintf("%s_%d%s", hash, size, ext)
 	physicalPath := filepath.Join(s.cfg.StorageDir, targetName)
 
 	if err := os.WriteFile(physicalPath, data, 0644); err != nil {
@@ -90,7 +79,7 @@ func (s *Service) SaveFile(uploaderID uint64, fileName, fileType string, data []
 	record := models.FileRecord{
 		FileHash:    hash,
 		FileName:    fileName,
-		FileSize:    uint64(len(data)),
+		FileSize:    size,
 		FileType:    fileType,
 		StoragePath: physicalPath,
 		UploaderID:  uploaderID,

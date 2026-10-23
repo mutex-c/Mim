@@ -18,6 +18,7 @@ type Conversation struct {
 	TargetID       uint64    `gorm:"not null;column:target_id;comment:单聊目标用户ID或群聊ID" json:"target_id"`
 	ConvType       int8      `gorm:"type:tinyint;not null;default:0;column:conv_type;comment:0单聊 1群聊" json:"conv_type"`
 	LastMsgID      uint64    `gorm:"not null;default:0;column:last_msg_id;comment:最新一条消息ID" json:"last_msg_id"`
+	LastMsgSeq     uint64    `gorm:"not null;default:0;column:last_msg_seq;comment:最新一条消息SeqId(并发乱序守卫)" json:"last_msg_seq"`
 	LastMsgPreview string    `gorm:"type:varchar(255);not null;default:'';column:last_msg_preview;comment:最新消息预览" json:"last_msg_preview"`
 	LastMsgTime    time.Time `gorm:"column:last_msg_time;not null;default:CURRENT_TIMESTAMP;index:idx_user_pinned_time,priority:3;comment:最新消息时间" json:"last_msg_time"`
 	LastReadSeq    uint64    `gorm:"not null;default:0;column:last_read_seq;comment:已读最大SeqId" json:"last_read_seq"`

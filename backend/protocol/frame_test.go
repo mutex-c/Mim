@@ -19,7 +19,7 @@ func TestFrameEncodeDecode(t *testing.T) {
 		SenderId:       1,
 		ReceiverId:     2,
 		MsgType:        protocol.MessageType_TEXT,
-		Content:        "Hello Mim Binary Protocol!",
+		Content:        "Hello Mim 24-Byte Aligned Protocol!",
 		SeqId:          1001,
 		SendTime:       1771650000000,
 	}
@@ -29,15 +29,19 @@ func TestFrameEncodeDecode(t *testing.T) {
 		t.Fatalf("failed to marshal protobuf: %v", err)
 	}
 
-	// 2. Wrap into a Frame
+	// 2. Wrap into a Frame (24 bytes header)
 	frame := protocol.NewFrame(protocol.CmdChatMessageSend, 1001, 0, payloadBytes)
 	encoded, err := frame.Encode()
 	if err != nil {
 		t.Fatalf("failed to encode frame: %v", err)
 	}
 
+	// Verify HeaderSize is exactly 24 bytes
 	if len(encoded) != protocol.HeaderSize+len(payloadBytes) {
 		t.Fatalf("unexpected encoded length: got %d, expected %d", len(encoded), protocol.HeaderSize+len(payloadBytes))
+	}
+	if protocol.HeaderSize != 24 {
+		t.Fatalf("expected HeaderSize to be 24, got %d", protocol.HeaderSize)
 	}
 
 	// 3. Decode Frame
