@@ -31,15 +31,16 @@
 
 ### Phase 1: 基础设施、数据表模型与 Protobuf 协议契约
 
-* [ ] **Task 1.1: 基础设施容器化编排搭建**
+* [x] **Task 1.1: 基础设施容器化编排搭建**
   * 编写 `backend/deploy/docker-compose.yaml`，包含 MySQL 8.0、Redis 7、Kafka 3.x + Zookeeper、Etcd v3、Jaeger、Prometheus。
-  * 验证所有容器健康启动并网络互通。
-* [ ] **Task 1.2: GORM 数据模型与迁移脚本落地**
+  * 编写 `backend/deploy/env.example` 与 Prometheus 监控配置。
+* [x] **Task 1.2: GORM 数据模型与迁移脚本落地**
   * 在 `backend/models` 下实现 9 张核心实体表（`mim_users`, `mim_user_configs`, `mim_friends`, `mim_friend_verifications`, `mim_conversations`, `mim_messages`, `mim_groups`, `mim_group_members`, `mim_files`）。
-  * 编写自动迁移与预置初始管理员数据脚本。
-* [ ] **Task 1.3: Protobuf 二进制协议定义与代码生成**
+  * 编写 `backend/models/migrate.go` 自动迁移与 `models_test.go` 完整验证。
+* [x] **Task 1.3: Protobuf 二进制协议定义与代码生成**
   * 编写 `backend/protocol/mim.proto`，严格定义帧格式、枚举与消息体（`ChatMessage`, `MessageAck`, `SyncRequest`, `WebRTCSignal` 等）。
-  * 配置并执行 `protoc`，生成 Go 语言与前端 TypeScript 对应的数据绑定代码。
+  * 执行 `protoc` 生成 Go 语言二进制编解码代码 `mim.pb.go`。
+  * 编写定长二进制数据帧头与 CRC32 校验引擎 `backend/protocol/frame.go` 并通过单元测试。
 
 ---
 

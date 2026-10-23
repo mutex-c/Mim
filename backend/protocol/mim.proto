@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package mim.protocol;
+
+option go_package = "mim/protocol";
+
+// 消息类型枚举
+enum MessageType {
+  TEXT = 0;                // 纯文本
+  MARKDOWN = 1;            // Markdown
+  IMAGE = 2;               // 图片
+  VOICE = 3;               // 语音音频
+  VIDEO = 4;               // 视频
+  FILE = 5;                // 文件
+  STICKER = 6;             // 表情贴纸
+  REVOKE = 7;              // 撤回通知
+  WEBRTC_SIGNAL = 8;       // 音视频通话信令
+  SYSTEM_NOTIFICATION = 9; // 系统通知
+}
+
+// 会话类型
+enum ConversationType {
+  SINGLE = 0; // 单聊
+  GROUP = 1;  // 群聊
+}
+
+// 引用与回复元数据
+message QuoteInfo {
+  uint64 quoted_msg_id = 1;
+  uint64 quoted_seq_id = 2;
+  uint64 quoted_user_id = 3;
+  string quoted_user_name = 4;
+  string preview_content = 5;
+}
+
+// 核心消息结构体
+message ChatMessage {
+  uint64 msg_id = 1;             // 服务端全局唯一 Snowflake ID
+  string client_msg_id = 2;     // 客户端本地生成的 UUID，用于幂等去重
+  string conversation_id = 3;   // 会话ID (单聊: 较小ID_较大ID, 群聊: 群ID)
+  ConversationType conv_type = 4;
+  uint64 sender_id = 5;
+  uint64 receiver_id = 6;        // 单聊为接收方用户ID，群聊为0
+  MessageType msg_type = 7;
+  string content = 8;           // 消息内容 (纯文本或媒体结构体JSON)
+  QuoteInfo quote = 9;          // 引用父消息
+  uint64 seq_id = 10;           // 会话内连续单调递增序号
+  int64 send_time = 11;         // 毫秒时间戳
+  bool is_encrypted = 12;       // 是否端到端加密
+}
+
+// 客户端投递确认 ACK
+message MessageAck {
+  string client_msg_id = 1;     // 客户端对应的 UUID
+  uint64 msg_id = 2;            // 服务端落库分配的全局消息ID
+  uint64 seq_id = 3;            // 服务端分配的单调递增会话 SeqId
+  int32 code = 4;               // 0 表示成功，非0为错误码
+  string error_msg = 5;
+  int64 server_time = 6;
+}
+
+// 增量同步请求 (断网重连/离线拉取)
+message SyncRequest {
+  string conversation_id = 1;
+  uint64 last_seq_id = 2;       // 客户端本地已同步的最大 SeqId
+  int32 limit = 3;              // 批次大小 (默认50，上限200)
+}
+
+// 增量同步响应
+message SyncResponse {
+  string conversation_id = 1;
+  repeated ChatMessage messages = 2;
+  bool has_more = 3;
+  uint64 latest_seq_id = 4;
+}
+
+// WebRTC 实时音视频信令
+message WebRTCSignal {
+  string call_id = 1;           // 通话唯一会话ID
+  uint64 from_user_id = 2;
+  uint64 to_user_id = 3;
+  string signal_type = 4;       // OFFER, ANSWER, CANDIDATE, REJECT, HANGUP
+  string data = 5;              // SDP 或 Candidate JSON 字符串
+}
+
+// 心跳包
+message Heartbeat {
+  int64 timestamp = 1;
+}
+
+// 认证握手包
+message AuthHandshake {
+  string token = 1;
+  string platform = 2;          // web, windows, android
+  string device_id = 3;
+}
