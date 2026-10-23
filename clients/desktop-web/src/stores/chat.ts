@@ -61,9 +61,16 @@ export const useChatStore = defineStore('chat', () => {
   const isWsConnected = ref<boolean>(false);
   const demoUsers = ref<DemoUser[]>([]);
 
+  const activeTab = ref<string>('chats'); // 'chats', 'contacts', 'calls'
   const activeConvId = ref<string>('1_2');
   const conversations = ref<ConversationItem[]>([]);
   const messagesByConv = ref<Record<string, MessageItem[]>>({});
+
+  // WebRTC Call State
+  const incomingCall = ref<{ callerId: number; callerName: string; callType: string; callId: string } | null>(null);
+  const activeCall = ref<{ peerId: number; peerName: string; callType: string; callId: string } | null>(null);
+  const callDuration = ref<number>(0);
+  let callTimerInterval: any = null;
 
   let socket: WebSocket | null = null;
   let heartbeatTimer: any = null;
@@ -85,7 +92,6 @@ export const useChatStore = defineStore('chat', () => {
       const json = await res.json();
       if (json.code === 0 && Array.isArray(json.data)) {
         demoUsers.value = json.data;
-        // If current user is not logged in, select user 1
         const initial = demoUsers.value.find((u) => u.user.id === currentUserId.value) || demoUsers.value[0];
         if (initial) {
           currentUserId.value = initial.user.id;
@@ -164,6 +170,13 @@ export const useChatStore = defineStore('chat', () => {
           const timeStr = m.created_at
             ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
             : '';
+          
+          let parsedType: MessageItem['msgType'] = 'text';
+          if (m.msg_type === 7) parsedType = 'revoke';
+          else if (m.msg_type === 2) parsedType = 'image';
+          else if (m.msg_type === 3) parsedType = 'voice';
+          else if (m.msg_type === 5) parsedType = 'file';
+
           return {
             id: String(m.id),
             clientMsgId: m.client_msg_id,
@@ -171,7 +184,7 @@ export const useChatStore = defineStore('chat', () => {
             senderId: m.sender_id,
             senderName: isMe ? currentUserName.value : (m.sender_name || 'Partner'),
             content: m.content,
-            msgType: m.msg_type === 7 ? 'revoke' : (m.msg_type === 3 ? 'voice' : 'text'),
+            msgType: parsedType,
             time: timeStr,
             isMe,
             status: isMe ? 'read' : 'delivered',
@@ -222,7 +235,6 @@ export const useChatStore = defineStore('chat', () => {
         isWsConnected.value = true;
         console.log(`[Mim WS] Connected as User ${currentUserId.value} (${currentUserName.value})`);
 
-        // Start Heartbeat every 25 seconds
         heartbeatTimer = setInterval(() => {
           if (socket && socket.readyState === WebSocket.OPEN) {
             const hb = encodeFrame(CmdType.HeartbeatPing, 0n, 0, new Uint8Array(0));
@@ -234,7 +246,6 @@ export const useChatStore = defineStore('chat', () => {
       socket.onclose = () => {
         isWsConnected.value = false;
         clearInterval(heartbeatTimer);
-        // Auto reconnect after 2.5s
         reconnectTimer = setTimeout(connectWs, 2500);
       };
 
@@ -261,21 +272,17 @@ export const useChatStore = defineStore('chat', () => {
 
       switch (frame.cmdType) {
         case CmdType.HeartbeatPong:
-          // Heartbeat acknowledged
           break;
 
         case CmdType.MessageAck: {
           const payloadStr = textDecoder.decode(frame.payload);
           const ack = JSON.parse(payloadStr);
-          // Update status of matching message in active conversation
           const list = messagesByConv.value[activeConvId.value] || [];
           const target = list.find((m) => m.clientMsgId === ack.client_msg_id);
           if (target) {
             target.status = 'sent';
             target.id = String(ack.msg_id);
             target.seqId = Number(ack.seq_id);
-
-            // Simulate delivered tick
             setTimeout(() => {
               target.status = 'delivered';
             }, 300);
@@ -293,6 +300,12 @@ export const useChatStore = defineStore('chat', () => {
           const now = new Date(pushMsg.send_time || Date.now());
           const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
+          let parsedType: MessageItem['msgType'] = 'text';
+          if (pushMsg.msg_type === 7) parsedType = 'revoke';
+          else if (pushMsg.msg_type === 2) parsedType = 'image';
+          else if (pushMsg.msg_type === 3) parsedType = 'voice';
+          else if (pushMsg.msg_type === 5) parsedType = 'file';
+
           const newMsg: MessageItem = {
             id: String(pushMsg.msg_id),
             clientMsgId: pushMsg.client_msg_id,
@@ -300,7 +313,7 @@ export const useChatStore = defineStore('chat', () => {
             senderId: pushMsg.sender_id,
             senderName: isMe ? currentUserName.value : (pushMsg.sender_name || 'Sarah Jenkins'),
             content: pushMsg.content,
-            msgType: pushMsg.msg_type === 7 ? 'revoke' : (pushMsg.msg_type === 3 ? 'voice' : 'text'),
+            msgType: parsedType,
             time: timeStr,
             isMe,
             status: 'read',
@@ -315,13 +328,11 @@ export const useChatStore = defineStore('chat', () => {
             messagesByConv.value[convId] = [];
           }
 
-          // Check duplicate
           const existing = messagesByConv.value[convId].find((m) => m.clientMsgId === pushMsg.client_msg_id || m.id === String(pushMsg.msg_id));
           if (!existing) {
             messagesByConv.value[convId].push(newMsg);
           }
 
-          // Update conversation list preview
           const conv = conversations.value.find((c) => c.id === convId);
           if (conv) {
             conv.lastMessage = pushMsg.content;
@@ -347,6 +358,31 @@ export const useChatStore = defineStore('chat', () => {
           break;
         }
 
+        case CmdType.WebRTCSignal: {
+          const payloadStr = textDecoder.decode(frame.payload);
+          const signal = JSON.parse(payloadStr);
+
+          if (signal.signal_type === 'OFFER') {
+            // Incoming Call
+            const caller = demoUsers.value.find((u) => u.user.id === signal.from_user_id)?.user.nickname || `User ${signal.from_user_id}`;
+            incomingCall.value = {
+              callerId: signal.from_user_id,
+              callerName: caller,
+              callType: signal.data?.includes('video') ? 'Video' : 'Audio',
+              callId: signal.call_id,
+            };
+          } else if (signal.signal_type === 'ANSWER') {
+            // Call accepted by peer
+            startCallTimer();
+          } else if (signal.signal_type === 'HANGUP' || signal.signal_type === 'REJECT') {
+            // Call ended or declined
+            incomingCall.value = null;
+            activeCall.value = null;
+            stopCallTimer();
+          }
+          break;
+        }
+
         default:
           console.log(`[WS] Frame received: 0x${frame.cmdType.toString(16)}`);
       }
@@ -356,7 +392,7 @@ export const useChatStore = defineStore('chat', () => {
   };
 
   // Send message over WebSocket using 24-byte binary Frame
-  const sendMessage = (content: string, quote?: MessageItem['quote']) => {
+  const sendMessage = (content: string, quote?: MessageItem['quote'], msgType: MessageItem['msgType'] = 'text', extra?: { fileName?: string; fileSize?: string; duration?: number }) => {
     if (!content.trim() || !activeConvId.value) return;
 
     const list = messagesByConv.value[activeConvId.value] || [];
@@ -366,7 +402,12 @@ export const useChatStore = defineStore('chat', () => {
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
-    // Local optimistic message
+    // Numeric message type enum mapping
+    let numType = 0;
+    if (msgType === 'image') numType = 2;
+    else if (msgType === 'voice') numType = 3;
+    else if (msgType === 'file') numType = 5;
+
     const newMsg: MessageItem = {
       id: 'local_' + Date.now(),
       clientMsgId,
@@ -374,24 +415,25 @@ export const useChatStore = defineStore('chat', () => {
       senderId: currentUserId.value,
       senderName: currentUserName.value,
       content,
-      msgType: 'text',
+      msgType,
       time: timeStr,
       isMe: true,
       status: 'sending',
       quote,
+      fileName: extra?.fileName,
+      fileSize: extra?.fileSize,
+      duration: extra?.duration,
     };
 
     list.push(newMsg);
     messagesByConv.value[activeConvId.value] = list;
 
-    // Update conversation item preview
     const conv = conversations.value.find((c) => c.id === activeConvId.value);
     if (conv) {
-      conv.lastMessage = content;
+      conv.lastMessage = msgType === 'image' ? '[Image]' : (msgType === 'file' ? `[File] ${extra?.fileName || ''}` : content);
       conv.lastTime = timeStr;
     }
 
-    // Send binary frame over WebSocket if connected
     if (socket && socket.readyState === WebSocket.OPEN) {
       const activeC = activeConversation.value;
       const payloadObj = {
@@ -400,7 +442,7 @@ export const useChatStore = defineStore('chat', () => {
         conv_type: activeC?.type === 'group' ? 1 : 0,
         sender_id: currentUserId.value,
         receiver_id: activeC?.targetId || 0,
-        msg_type: 0,
+        msg_type: numType,
         content,
         quote: quote ? {
           quoted_msg_id: Number(quote.msgId) || 0,
@@ -412,7 +454,6 @@ export const useChatStore = defineStore('chat', () => {
       const frameBuffer = encodeFrame(CmdType.ChatMessageSend, BigInt(nextSeq), FLAG_JSON, payloadBytes);
       socket.send(frameBuffer);
     } else {
-      // Mock fallback if disconnected
       setTimeout(() => {
         newMsg.status = 'sent';
         setTimeout(() => {
@@ -431,7 +472,6 @@ export const useChatStore = defineStore('chat', () => {
       target.isRevoked = true;
       target.content = '你撤回了一条消息';
 
-      // Call API
       try {
         await fetch('/api/chat/revoke', {
           method: 'POST',
@@ -443,6 +483,78 @@ export const useChatStore = defineStore('chat', () => {
         });
       } catch (_) {}
     }
+  };
+
+  // WebRTC Signaling Functions
+  const sendWebRTCSignal = (signalType: string, toUserId: number, callId: string, data: string = '') => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+    const signalObj = {
+      call_id: callId,
+      from_user_id: currentUserId.value,
+      to_user_id: toUserId,
+      signal_type: signalType,
+      data: data,
+    };
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(signalObj));
+    const frameBuffer = encodeFrame(CmdType.WebRTCSignal, 0n, FLAG_JSON, payloadBytes);
+    socket.send(frameBuffer);
+  };
+
+  const initiateWebRTCCall = (type: 'audio' | 'video') => {
+    const activeC = activeConversation.value;
+    if (!activeC || activeC.type === 'group') return;
+
+    const callId = 'call_' + Date.now();
+    activeCall.value = {
+      peerId: activeC.targetId,
+      peerName: activeC.title,
+      callType: type,
+      callId,
+    };
+
+    sendWebRTCSignal('OFFER', activeC.targetId, callId, type);
+    startCallTimer();
+  };
+
+  const acceptIncomingCall = () => {
+    if (!incomingCall.value) return;
+    const inc = incomingCall.value;
+    activeCall.value = {
+      peerId: inc.callerId,
+      peerName: inc.callerName,
+      callType: inc.callType,
+      callId: inc.callId,
+    };
+    sendWebRTCSignal('ANSWER', inc.callerId, inc.callId, inc.callType);
+    incomingCall.value = null;
+    startCallTimer();
+  };
+
+  const rejectIncomingCall = () => {
+    if (!incomingCall.value) return;
+    sendWebRTCSignal('REJECT', incomingCall.value.callerId, incomingCall.value.callId);
+    incomingCall.value = null;
+  };
+
+  const endActiveCall = () => {
+    if (!activeCall.value) return;
+    sendWebRTCSignal('HANGUP', activeCall.value.peerId, activeCall.value.callId);
+    activeCall.value = null;
+    stopCallTimer();
+  };
+
+  const startCallTimer = () => {
+    stopCallTimer();
+    callDuration.value = 0;
+    callTimerInterval = setInterval(() => {
+      callDuration.value++;
+    }, 1000);
+  };
+
+  const stopCallTimer = () => {
+    clearInterval(callTimerInterval);
+    callTimerInterval = null;
   };
 
   // Auto initialize on load
@@ -458,14 +570,22 @@ export const useChatStore = defineStore('chat', () => {
     userToken,
     isWsConnected,
     demoUsers,
+    activeTab,
     activeConvId,
     conversations,
     activeConversation,
     activeMessages,
+    incomingCall,
+    activeCall,
+    callDuration,
     switchAccount,
     selectConversation,
     sendMessage,
     revokeMessage,
     fetchConversations,
+    initiateWebRTCCall,
+    acceptIncomingCall,
+    rejectIncomingCall,
+    endActiveCall,
   };
 });

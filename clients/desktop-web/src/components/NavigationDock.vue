@@ -58,15 +58,15 @@
       <button
         v-for="item in navItems"
         :key="item.id"
-        @click="activeTab = item.id"
+        @click="chatStore.activeTab = item.id"
         class="w-full h-11 rounded-xl flex items-center justify-center transition-all duration-150 relative group"
-        :class="activeTab === item.id 
+        :class="chatStore.activeTab === item.id 
           ? 'bg-blue-600/10 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 font-medium' 
           : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
       >
         <component :is="item.icon" class="w-5 h-5 inline-icon" />
         <span 
-          v-if="activeTab === item.id" 
+          v-if="chatStore.activeTab === item.id" 
           class="absolute left-0 top-3 bottom-3 w-1 bg-blue-600 dark:bg-blue-500 rounded-r-full"
         ></span>
         <!-- Tooltip -->
@@ -93,7 +93,9 @@
       </button>
 
       <button
+        @click="$emit('open-settings')"
         class="w-full h-11 rounded-xl flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 transition-colors relative group"
+        title="Settings"
       >
         <Settings class="w-5 h-5 inline-icon" />
         <span class="absolute left-16 px-2.5 py-1 text-xs rounded-md bg-mim-light-card dark:bg-mim-dark-card shadow-card text-mim-light-text dark:text-mim-dark-text opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
@@ -112,8 +114,9 @@ import { useChatStore, DemoUser } from '../stores/chat';
 
 const themeStore = useThemeStore();
 const chatStore = useChatStore();
-const activeTab = ref('chats');
 const showAccountMenu = ref(false);
+
+defineEmits(['open-settings']);
 
 const navItems = [
   { id: 'chats', name: 'Conversations', icon: MessageSquare },

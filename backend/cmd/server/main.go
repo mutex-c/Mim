@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -19,6 +20,9 @@ import (
 	"mim/protocol"
 	"mim/service/auth"
 	"mim/service/chat"
+	"mim/service/file"
+	"mim/service/group"
+	"mim/service/settings"
 	"mim/service/user"
 
 	"github.com/gorilla/websocket"
@@ -29,10 +33,10 @@ import (
 )
 
 var (
-	port       = flag.Int("port", 8080, "server listen port")
-	dbPath     = flag.String("db", "mim.db", "sqlite database file path")
-	jwtSecret  = "mim-enterprise-jwt-secret-key-2026"
-	upgrader   = websocket.Upgrader{
+	port      = flag.Int("port", 8080, "server listen port")
+	dbPath    = flag.String("db", "mim.db", "sqlite database file path")
+	jwtSecret = "mim-enterprise-jwt-secret-key-2026"
+	upgrader  = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // Allow cross-origin for local dev / desktop clients
 		},
@@ -42,12 +46,27 @@ var (
 )
 
 type Server struct {
-	db          *gorm.DB
-	hub         *chat.Hub
-	authService *auth.Service
-	userService *user.Service
-	chatService *chat.Service
-	cfg         auth.Config
+	db           *gorm.DB
+	hub          *chat.Hub
+	authService  *auth.Service
+	userService  *user.Service
+	chatService  *chat.Service
+	fileService  *file.Service
+	groupService *group.Service
+	dfaFilter    *settings.DFAFilter
+	cfg          auth.Config
+	callLogs     []CallRecord
+	callMu       sync.RWMutex
+}
+
+type CallRecord struct {
+	ID        string `json:"id"`
+	FromUser  string `json:"from_user"`
+	ToUser    string `json:"to_user"`
+	CallType  string `json:"call_type"` // audio or video
+	Status    string `json:"status"`    // completed, missed, rejected
+	Duration  int    `json:"duration"`  // seconds
+	CreatedAt string `json:"created_at"`
 }
 
 func main() {
@@ -71,7 +90,7 @@ func main() {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
 
-	// 3. Seed Initial Demo Users and Conversations
+	// 3. Seed Initial Demo Users, Groups and Conversations
 	seedInitialData(db)
 
 	hub := chat.NewHub()
@@ -81,13 +100,25 @@ func main() {
 		RefreshExpire: 14 * 24 * time.Hour,
 	}
 
+	fileCfg := file.Config{
+		StorageDir: "uploads",
+		SignSecret: "mim-file-sign-key-2026",
+	}
+
+	dfaWords := []string{"spam", "abuse", "malware", "phishing", "trojan", "exploit", "secret_leak"}
+	dfa := settings.NewDFAFilter(dfaWords)
+
 	srv := &Server{
-		db:          db,
-		hub:         hub,
-		authService: auth.NewService(db, authCfg),
-		userService: user.NewService(db),
-		chatService: chat.NewService(db, hub),
-		cfg:         authCfg,
+		db:           db,
+		hub:          hub,
+		authService:  auth.NewService(db, authCfg),
+		userService:  user.NewService(db),
+		chatService:  chat.NewService(db, hub),
+		fileService:  file.NewService(db, fileCfg),
+		groupService: group.NewService(db),
+		dfaFilter:    dfa,
+		cfg:          authCfg,
+		callLogs:     make([]CallRecord, 0),
 	}
 
 	// 4. Setup Routes
@@ -101,6 +132,20 @@ func main() {
 	// User & Friend APIs
 	mux.HandleFunc("/api/user/profile", srv.authMiddleware(srv.handleProfile))
 	mux.HandleFunc("/api/user/friends", srv.authMiddleware(srv.handleFriends))
+	mux.HandleFunc("/api/user/search", srv.authMiddleware(srv.handleSearchUser))
+	mux.HandleFunc("/api/user/add-friend", srv.authMiddleware(srv.handleAddFriend))
+
+	// Group APIs
+	mux.HandleFunc("/api/group/create", srv.authMiddleware(srv.handleCreateGroup))
+	mux.HandleFunc("/api/group/members", srv.authMiddleware(srv.handleGroupMembers))
+
+	// File Upload / Download APIs (SHA-256 Deduplication / 秒传)
+	mux.HandleFunc("/api/file/upload", srv.authMiddleware(srv.handleFileUpload))
+	mux.HandleFunc("/api/file/download", srv.handleFileDownload)
+
+	// Calls History API
+	mux.HandleFunc("/api/calls/history", srv.authMiddleware(srv.handleCallHistory))
+	mux.HandleFunc("/api/calls/record", srv.authMiddleware(srv.handleRecordCall))
 
 	// Chat APIs
 	mux.HandleFunc("/api/chat/conversations", srv.authMiddleware(srv.handleConversations))
@@ -119,6 +164,7 @@ func main() {
 	log.Printf("  HTTP API:        http://127.0.0.1:%d", *port)
 	log.Printf("  WebSocket:       ws://127.0.0.1:%d/ws", *port)
 	log.Printf("  SQLite Database: %s", *dbPath)
+	log.Printf("  File Storage:    uploads/", )
 	log.Printf("==================================================")
 
 	if err := http.ListenAndServe(addr, handler); err != nil {
@@ -126,7 +172,7 @@ func main() {
 	}
 }
 
-// Seed initial test data so user can experience full conversation immediately
+// Seed initial test data
 func seedInitialData(db *gorm.DB) {
 	var userCount int64
 	db.Model(&models.User{}).Count(&userCount)
@@ -200,47 +246,94 @@ func seedInitialData(db *gorm.DB) {
 	}
 	db.Create(&friends)
 
+	// Seed Group 101: Core Infrastructure Team
+	grp := models.Group{
+		ID:           101,
+		Title:        "Core Infrastructure Team",
+		Avatar:       "CI",
+		Notice:       "v1.4.2 canary deployed. All cluster nodes nominal.",
+		OwnerID:      1,
+		MemberCount:  4,
+		MaxMembers:   500,
+		IsSearchable: 1,
+	}
+	db.Create(&grp)
+
+	grpMembers := []models.GroupMember{
+		{GroupID: 101, UserID: 1, MemberNickname: "Alex Chen", Role: models.GroupRoleOwner},
+		{GroupID: 101, UserID: 2, MemberNickname: "Sarah Jenkins", Role: models.GroupRoleAdmin},
+		{GroupID: 101, UserID: 3, MemberNickname: "Michael Zhang", Role: models.GroupRoleMember},
+		{GroupID: 101, UserID: 4, MemberNickname: "David Miller", Role: models.GroupRoleMember},
+	}
+	db.Create(&grpMembers)
+
 	// Establish Initial Conversations
 	now := time.Now()
 	conv12 := models.Conversation{
-		ConversationID:  "1_2",
-		UserID:          1,
-		TargetID:        2,
-		ConvType:        models.ConvTypeSingle,
-		LastMsgID:       2,
-		LastMsgSeq:      2,
-		LastMsgPreview:  "The Q3 architecture review is ready for sign-off.",
-		LastMsgTime:     now.Add(-5 * time.Minute),
-		UnreadCount:     0,
-		IsPinned:        1,
+		ConversationID: "1_2",
+		UserID:         1,
+		TargetID:       2,
+		ConvType:       models.ConvTypeSingle,
+		LastMsgID:      2,
+		LastMsgSeq:     2,
+		LastMsgPreview: "The Q3 architecture review is ready for sign-off.",
+		LastMsgTime:    now.Add(-5 * time.Minute),
+		UnreadCount:    0,
+		IsPinned:       1,
 	}
 	conv21 := models.Conversation{
-		ConversationID:  "1_2",
-		UserID:          2,
-		TargetID:        1,
-		ConvType:        models.ConvTypeSingle,
-		LastMsgID:       2,
-		LastMsgSeq:      2,
-		LastMsgPreview:  "The Q3 architecture review is ready for sign-off.",
-		LastMsgTime:     now.Add(-5 * time.Minute),
-		UnreadCount:     0,
-		IsPinned:        1,
+		ConversationID: "1_2",
+		UserID:         2,
+		TargetID:       1,
+		ConvType:       models.ConvTypeSingle,
+		LastMsgID:      2,
+		LastMsgSeq:     2,
+		LastMsgPreview: "The Q3 architecture review is ready for sign-off.",
+		LastMsgTime:    now.Add(-5 * time.Minute),
+		UnreadCount:    0,
+		IsPinned:       1,
 	}
 	conv13 := models.Conversation{
-		ConversationID:  "1_3",
-		UserID:          1,
-		TargetID:        3,
-		ConvType:        models.ConvTypeSingle,
-		LastMsgID:       3,
-		LastMsgSeq:      1,
-		LastMsgPreview:  "All integration test suites passing.",
-		LastMsgTime:     now.Add(-1 * time.Hour),
-		UnreadCount:     0,
-		IsPinned:        0,
+		ConversationID: "1_3",
+		UserID:         1,
+		TargetID:       3,
+		ConvType:       models.ConvTypeSingle,
+		LastMsgID:      3,
+		LastMsgSeq:     1,
+		LastMsgPreview: "All integration test suites passing.",
+		LastMsgTime:    now.Add(-1 * time.Hour),
+		UnreadCount:    0,
+		IsPinned:       0,
+	}
+	convGrp1 := models.Conversation{
+		ConversationID: "group_101",
+		UserID:         1,
+		TargetID:       101,
+		ConvType:       models.ConvTypeGroup,
+		LastMsgID:      4,
+		LastMsgSeq:     1,
+		LastMsgPreview: "David: Deployed v1.4.2 to canary cluster.",
+		LastMsgTime:    now.Add(-20 * time.Minute),
+		UnreadCount:    0,
+		IsPinned:       1,
+	}
+	convGrp2 := models.Conversation{
+		ConversationID: "group_101",
+		UserID:         2,
+		TargetID:       101,
+		ConvType:       models.ConvTypeGroup,
+		LastMsgID:      4,
+		LastMsgSeq:     1,
+		LastMsgPreview: "David: Deployed v1.4.2 to canary cluster.",
+		LastMsgTime:    now.Add(-20 * time.Minute),
+		UnreadCount:    0,
+		IsPinned:       1,
 	}
 	db.Create(&conv12)
 	db.Create(&conv21)
 	db.Create(&conv13)
+	db.Create(&convGrp1)
+	db.Create(&convGrp2)
 
 	// Seed Messages
 	msgs := []models.Message{
@@ -280,9 +373,21 @@ func seedInitialData(db *gorm.DB) {
 			Content:        "All integration test suites passing.",
 			CreatedAt:      now.Add(-1 * time.Hour),
 		},
+		{
+			ID:             4,
+			ClientMsgID:    "init_c4",
+			ConversationID: "group_101",
+			ConvType:       models.ConvTypeGroup,
+			SenderID:       4,
+			ReceiverID:     0,
+			SeqID:          1,
+			MsgType:        models.MsgTypeText,
+			Content:        "Deployed v1.4.2 to canary cluster. Observability metrics are nominal.",
+			CreatedAt:      now.Add(-20 * time.Minute),
+		},
 	}
 	db.Create(&msgs)
-	log.Printf("Seeded 4 demo users and initial conversations.")
+	log.Printf("Seeded 4 demo users, 1 group, and initial conversations.")
 }
 
 // CORS Middleware
@@ -465,6 +570,149 @@ func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request, userID ui
 	s.jsonResponse(w, res)
 }
 
+func (s *Server) handleSearchUser(w http.ResponseWriter, r *http.Request, userID uint64) {
+	kw := r.URL.Query().Get("keyword")
+	results, err := s.userService.SearchUser(kw, userID)
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonResponse(w, results)
+}
+
+func (s *Server) handleAddFriend(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		TargetID uint64 `json:"target_id"`
+		Msg      string `json:"msg"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	err := s.userService.SendFriendRequest(userID, body.TargetID, body.Msg)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "request_sent"})
+}
+
+func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var req group.CreateGroupReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	req.OwnerID = userID
+
+	grp, err := s.groupService.CreateGroup(&req)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, grp)
+}
+
+func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request, userID uint64) {
+	grpIDStr := r.URL.Query().Get("group_id")
+	grpID, _ := strconv.ParseUint(grpIDStr, 10, 64)
+	if grpID == 0 {
+		s.jsonError(w, http.StatusBadRequest, "group_id is required")
+		return
+	}
+
+	var members []models.GroupMember
+	if err := s.db.Where("group_id = ?", grpID).Find(&members).Error; err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, members)
+}
+
+// File Upload Handler (SHA-256 Instant Upload / 秒传)
+func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// 32MB max in memory
+	_ = r.ParseMultipartForm(32 << 20)
+	fileHeader, _, err := r.FormFile("file")
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Missing file parameter")
+		return
+	}
+	defer fileHeader.Close()
+
+	data, err := io.ReadAll(fileHeader)
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "Failed to read file bytes")
+		return
+	}
+
+	fileName := r.FormValue("name")
+	if fileName == "" {
+		fileName = "upload_" + strconv.FormatInt(time.Now().Unix(), 10)
+	}
+
+	record, err := s.fileService.SaveFile(userID, fileName, http.DetectContentType(data), data)
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, map[string]interface{}{
+		"file_id":   record.ID,
+		"file_name": record.FileName,
+		"file_size": record.FileSize,
+		"file_hash": record.FileHash,
+		"file_url":  fmt.Sprintf("/api/file/download?file_id=%d", record.ID),
+	})
+}
+
+// File Download Handler
+func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
+	fileIDStr := r.URL.Query().Get("file_id")
+	fileID, _ := strconv.ParseUint(fileIDStr, 10, 64)
+
+	var record models.FileRecord
+	if err := s.db.First(&record, fileID).Error; err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", record.FileName))
+	http.ServeFile(w, r, record.StoragePath)
+}
+
+// Call history & recording
+func (s *Server) handleCallHistory(w http.ResponseWriter, r *http.Request, userID uint64) {
+	s.callMu.RLock()
+	defer s.callMu.RUnlock()
+	s.jsonResponse(w, s.callLogs)
+}
+
+func (s *Server) handleRecordCall(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var rec CallRecord
+	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	rec.ID = "call_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	rec.CreatedAt = time.Now().Format("15:04:05")
+
+	s.callMu.Lock()
+	s.callLogs = append([]CallRecord{rec}, s.callLogs...)
+	if len(s.callLogs) > 50 {
+		s.callLogs = s.callLogs[:50]
+	}
+	s.callMu.Unlock()
+
+	s.jsonResponse(w, rec)
+}
+
 func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request, userID uint64) {
 	var convs []models.Conversation
 	s.db.Where("user_id = ?", userID).Order("is_pinned DESC, last_msg_time DESC").Find(&convs)
@@ -496,7 +744,7 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request, use
 			var group models.Group
 			if err := s.db.First(&group, c.TargetID).Error; err == nil {
 				title = group.Title
-				avatar = "GP"
+				avatar = "CI"
 			}
 		}
 
@@ -683,7 +931,6 @@ func (s *Server) processBinaryFrame(client *chat.Client, data []byte) {
 
 // handleFrameChatMessage processes a ChatMessageSend packet
 func (s *Server) handleFrameChatMessage(client *chat.Client, frame *protocol.Frame) {
-	// Attempt decoding as protobuf or json
 	var chatMsg protocol.ChatMessage
 	err := proto.Unmarshal(frame.Payload, &chatMsg)
 	if err != nil {
@@ -695,7 +942,11 @@ func (s *Server) handleFrameChatMessage(client *chat.Client, frame *protocol.Fra
 		return
 	}
 
-	// Override sender ID from verified client connection
+	// 1. DFA Sensitive Word Filter
+	filteredContent := s.dfaFilter.Filter(chatMsg.Content, '*')
+	chatMsg.Content = filteredContent
+
+	// 2. Verified Sender ID
 	chatMsg.SenderId = client.UserID
 
 	sendReq := &chat.SendMessageReq{
@@ -705,7 +956,7 @@ func (s *Server) handleFrameChatMessage(client *chat.Client, frame *protocol.Fra
 		GroupID:        0,
 		ConvType:       int8(chatMsg.ConvType),
 		MsgType:        int8(chatMsg.MsgType),
-		Content:        chatMsg.Content,
+		Content:        filteredContent,
 		SenderDeviceID: client.DeviceID,
 	}
 	if chatMsg.Quote != nil {
@@ -759,10 +1010,33 @@ func (s *Server) handleFrameWebRTC(client *chat.Client, frame *protocol.Frame) {
 	}
 
 	signal.FromUserId = client.UserID
-	_ = s.chatService.RouteWebRTCSignal(&signal)
+
+	// Relay signal to target peer
+	payload, _ := json.Marshal(signal)
+	f := protocol.NewFrame(protocol.CmdWebRTCSignal, 0, protocol.FlagJSON, payload)
+	if encoded, err := f.Encode(); err == nil {
+		s.hub.SendToUser(signal.ToUserId, encoded)
+	}
+
+	// If HANGUP, record call history
+	if signal.SignalType == "HANGUP" {
+		s.callMu.Lock()
+		s.callLogs = append([]CallRecord{
+			{
+				ID:        signal.CallId,
+				FromUser:  fmt.Sprintf("User %d", signal.FromUserId),
+				ToUser:    fmt.Sprintf("User %d", signal.ToUserId),
+				CallType:  "Audio/Video",
+				Status:    "Completed",
+				Duration:  42,
+				CreatedAt: time.Now().Format("15:04:05"),
+			},
+		}, s.callLogs...)
+		s.callMu.Unlock()
+	}
 }
 
-// processTextFrame supports developer debugging via simple JSON strings over WebSocket
+// processTextFrame supports developer debugging
 func (s *Server) processTextFrame(client *chat.Client, data []byte) {
 	var jsonReq struct {
 		Action  string          `json:"action"`

@@ -1,5 +1,23 @@
 <template>
-  <main class="flex-1 h-full flex flex-col bg-mim-light-stage dark:bg-mim-dark-stage relative select-none">
+  <main
+    @dragover.prevent="isDragging = true"
+    @dragleave.prevent="isDragging = false"
+    @drop.prevent="handleFileDrop"
+    class="flex-1 h-full flex flex-col bg-mim-light-stage dark:bg-mim-dark-stage relative select-none"
+  >
+    <!-- Hidden File Inputs -->
+    <input type="file" ref="imageInputRef" @change="handleImageSelected" accept="image/*" class="hidden" />
+    <input type="file" ref="fileInputRef" @change="handleFileSelected" class="hidden" />
+
+    <!-- Drag & Drop Overlay -->
+    <div
+      v-if="isDragging"
+      class="absolute inset-4 rounded-2xl border-2 border-dashed border-blue-500 bg-blue-500/10 backdrop-blur-sm z-40 flex flex-col items-center justify-center pointer-events-none text-blue-600 dark:text-blue-400 gap-2"
+    >
+      <UploadCloud class="w-10 h-10 animate-bounce inline-icon" />
+      <span class="text-sm font-semibold">Drop files here to upload (SHA-256 Instant Upload)</span>
+    </div>
+
     <!-- Top Stage Header -->
     <header class="h-16 px-6 flex items-center justify-between bg-mim-light-stage/80 dark:bg-mim-dark-stage/80 backdrop-blur-md z-10 shrink-0">
       <div class="flex items-center gap-3">
@@ -18,7 +36,7 @@
               v-if="chatStore.activeConversation?.isOnline" 
               class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"
             ></span>
-            <span>{{ chatStore.activeConversation?.isOnline ? 'Online (E2EE Session)' : 'Encrypted Session' }}</span>
+            <span>{{ chatStore.activeConversation?.isOnline ? 'Online (E2EE Active)' : 'Cluster Encrypted' }}</span>
           </p>
         </div>
       </div>
@@ -26,20 +44,21 @@
       <!-- Action Buttons: Audio Call, Video Call, Details (No Emoji) -->
       <div class="flex items-center gap-1">
         <button
-          @click="initiateCall('audio')"
+          @click="startCall('audio')"
           class="w-9 h-9 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
-          title="Audio Call"
+          title="Audio Call (WebRTC)"
         >
           <Phone class="w-4 h-4 inline-icon" />
         </button>
         <button
-          @click="initiateCall('video')"
+          @click="startCall('video')"
           class="w-9 h-9 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
-          title="Video Call"
+          title="Video Call (WebRTC)"
         >
           <Video class="w-4 h-4 inline-icon" />
         </button>
         <button
+          @click="showConvInfo = !showConvInfo"
           class="w-9 h-9 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
           title="Conversation Info"
         >
@@ -114,22 +133,74 @@
               {{ msg.content }}
             </p>
 
+            <!-- Image Message -->
+            <div v-else-if="msg.msgType === 'image'" class="py-1">
+              <img
+                :src="msg.content"
+                alt="Image message"
+                class="max-w-xs max-h-60 rounded-xl object-cover cursor-pointer hover:opacity-95 shadow-sm transition-opacity"
+                @click="openLightbox(msg.content)"
+              />
+            </div>
+
+            <!-- File / Document Message -->
+            <div v-else-if="msg.msgType === 'file'" class="flex items-center gap-3 py-1 min-w-[220px]">
+              <div class="w-10 h-10 rounded-xl bg-black/10 dark:bg-white/10 flex items-center justify-center shrink-0">
+                <FileText class="w-5 h-5 inline-icon" />
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-semibold truncate">{{ msg.fileName || 'Document' }}</div>
+                <div class="text-[10px] opacity-75 font-mono tabular-nums">{{ msg.fileSize || 'Instant Upload' }}</div>
+              </div>
+              <a
+                :href="msg.content"
+                target="_blank"
+                download
+                class="w-7 h-7 rounded-lg flex items-center justify-center bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 transition-colors shrink-0"
+                title="Download File"
+              >
+                <Download class="w-3.5 h-3.5 inline-icon" />
+              </a>
+            </div>
+
             <!-- Voice Note Message (Rule 6: tabular-nums for duration) -->
             <div v-else-if="msg.msgType === 'voice'" class="flex items-center gap-3 py-1">
-              <button class="w-8 h-8 rounded-full bg-black/10 dark:bg-white/10 flex items-center justify-center hover:scale-105 transition-transform">
-                <Play class="w-4 h-4 inline-icon ml-0.5" />
+              <button
+                @click="playVoice(msg.id)"
+                class="w-8 h-8 rounded-full bg-black/10 dark:bg-white/10 flex items-center justify-center hover:scale-105 transition-transform"
+              >
+                <Pause v-if="playingVoiceId === msg.id" class="w-4 h-4 inline-icon" />
+                <Play v-else class="w-4 h-4 inline-icon ml-0.5" />
               </button>
               <div class="flex items-center gap-1 h-5">
-                <span class="w-0.5 h-3 bg-current opacity-40 rounded-full"></span>
-                <span class="w-0.5 h-5 bg-current opacity-80 rounded-full"></span>
-                <span class="w-0.5 h-2 bg-current opacity-40 rounded-full"></span>
-                <span class="w-0.5 h-4 bg-current opacity-90 rounded-full"></span>
-                <span class="w-0.5 h-5 bg-current opacity-70 rounded-full"></span>
-                <span class="w-0.5 h-3 bg-current opacity-50 rounded-full"></span>
+                <span class="w-0.5 h-3 bg-current rounded-full" :class="playingVoiceId === msg.id ? 'animate-pulse' : 'opacity-40'"></span>
+                <span class="w-0.5 h-5 bg-current rounded-full" :class="playingVoiceId === msg.id ? 'animate-pulse' : 'opacity-80'"></span>
+                <span class="w-0.5 h-2 bg-current rounded-full" :class="playingVoiceId === msg.id ? 'animate-pulse' : 'opacity-40'"></span>
+                <span class="w-0.5 h-4 bg-current rounded-full" :class="playingVoiceId === msg.id ? 'animate-pulse' : 'opacity-90'"></span>
+                <span class="w-0.5 h-5 bg-current rounded-full" :class="playingVoiceId === msg.id ? 'animate-pulse' : 'opacity-70'"></span>
+                <span class="w-0.5 h-3 bg-current rounded-full" :class="playingVoiceId === msg.id ? 'animate-pulse' : 'opacity-50'"></span>
               </div>
               <span class="text-xs font-mono tabular-nums opacity-90">
-                {{ msg.duration }}s
+                {{ msg.duration || 6 }}s
               </span>
+            </div>
+
+            <!-- AI Summary Card (Rule 4: Stream blur typography) -->
+            <div v-else-if="msg.msgType === 'ai_summary'" class="space-y-2 py-1 max-w-md">
+              <div class="flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                <Sparkles class="w-4 h-4 inline-icon" />
+                <span>Mim AI Intelligence Summary</span>
+              </div>
+              <div class="text-xs leading-relaxed pretty-wrap">
+                <span
+                  v-for="(char, idx) in msg.content"
+                  :key="idx"
+                  class="stream-char"
+                  :style="{ animationDelay: `${idx * 20}ms` }"
+                >
+                  {{ char }}
+                </span>
+              </div>
             </div>
 
             <!-- Revoke Message -->
@@ -187,16 +258,33 @@
         <div class="flex items-center justify-between pt-1">
           <!-- Multimedia & AI Action Buttons (Zero Emoji) -->
           <div class="flex items-center gap-1">
-            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors" title="Attach Image">
+            <button
+              @click="triggerImageInput"
+              class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
+              title="Attach Image"
+            >
               <Image class="w-4 h-4 inline-icon" />
             </button>
-            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors" title="Attach Document">
+            <button
+              @click="triggerFileInput"
+              class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
+              title="Attach Document (Instant Upload / 秒传)"
+            >
               <Paperclip class="w-4 h-4 inline-icon" />
             </button>
-            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors" title="Audio Recording">
+            <button
+              @click="toggleVoiceRecording"
+              class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
+              :class="isRecording ? 'bg-red-500/20 text-red-500 animate-pulse' : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
+              title="Voice Recording"
+            >
               <Mic class="w-4 h-4 inline-icon" />
             </button>
-            <button @click="triggerAISummary" class="px-2 h-8 rounded-lg flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-600/10 dark:hover:bg-blue-500/15 transition-colors font-medium" title="AI Chat Summary">
+            <button
+              @click="triggerAISummary"
+              class="px-2 h-8 rounded-lg flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-600/10 dark:hover:bg-blue-500/15 transition-colors font-medium"
+              title="AI Chat Summary (Rule 4 Stream Blur)"
+            >
               <Sparkles class="w-3.5 h-3.5 inline-icon" />
               <span>AI Summary</span>
             </button>
@@ -215,19 +303,18 @@
       </div>
     </div>
 
-    <!-- Active WebRTC Call Overlay (if call is active) -->
+    <!-- Active WebRTC Call Overlay -->
     <div
-      v-if="activeCallType"
-      class="absolute inset-x-6 top-6 bottom-24 rounded-2xl bg-black/85 backdrop-blur-xl border border-white/10 flex flex-col items-center justify-between p-8 text-white z-50 shadow-2xl"
+      v-if="chatStore.activeCall"
+      class="absolute inset-x-6 top-6 bottom-24 rounded-2xl bg-black/90 backdrop-blur-xl border border-white/10 flex flex-col items-center justify-between p-8 text-white z-50 shadow-2xl"
     >
       <div class="flex flex-col items-center gap-3">
         <div class="w-20 h-20 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-2xl font-bold">
-          {{ chatStore.activeConversation?.avatarText }}
+          {{ chatStore.activeCall.peerName.substring(0, 2).toUpperCase() }}
         </div>
-        <h3 class="text-lg font-semibold">{{ chatStore.activeConversation?.title }}</h3>
-        <!-- Rule 6: Monospace Call Duration -->
+        <h3 class="text-lg font-semibold">{{ chatStore.activeCall.peerName }}</h3>
         <span class="px-3 py-1 rounded-full bg-white/10 text-xs font-mono tabular-nums">
-          {{ callTimer }}
+          {{ formattedCallDuration }}
         </span>
       </div>
 
@@ -241,18 +328,64 @@
           <Mic v-else class="w-5 h-5 inline-icon" />
         </button>
         <button
-          @click="endCall"
+          @click="chatStore.endActiveCall"
           class="w-14 h-14 rounded-full bg-red-600 hover:bg-red-500 flex items-center justify-center text-white transition-colors shadow-lg shadow-red-600/30"
+          title="Hang Up"
         >
           <PhoneOff class="w-6 h-6 inline-icon" />
         </button>
       </div>
     </div>
+
+    <!-- Incoming Call Overlay -->
+    <div
+      v-if="chatStore.incomingCall"
+      class="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 select-none"
+    >
+      <div class="w-full max-w-sm rounded-2xl bg-mim-light-card dark:bg-mim-dark-card p-6 shadow-2xl border border-black/10 dark:border-white/10 flex flex-col items-center gap-4 text-center">
+        <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xl animate-pulse">
+          {{ chatStore.incomingCall.callerName.substring(0, 2).toUpperCase() }}
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-mim-light-text dark:text-mim-dark-text">
+            {{ chatStore.incomingCall.callerName }}
+          </h3>
+          <p class="text-xs text-mim-light-muted dark:text-mim-dark-muted mt-0.5">
+            Incoming {{ chatStore.incomingCall.callType }} Call (WebRTC)...
+          </p>
+        </div>
+        <div class="flex items-center gap-6 mt-2">
+          <button
+            @click="chatStore.rejectIncomingCall"
+            class="w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center transition-colors shadow-lg shadow-red-600/30"
+            title="Decline"
+          >
+            <PhoneOff class="w-5 h-5 inline-icon" />
+          </button>
+          <button
+            @click="chatStore.acceptIncomingCall"
+            class="w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center transition-colors shadow-lg shadow-emerald-600/30 animate-bounce"
+            title="Accept"
+          >
+            <Phone class="w-5 h-5 inline-icon" />
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lightbox Modal for Images -->
+    <div
+      v-if="lightboxImage"
+      @click="lightboxImage = null"
+      class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-6 cursor-zoom-out"
+    >
+      <img :src="lightboxImage" class="max-w-full max-h-full rounded-xl object-contain shadow-2xl" />
+    </div>
   </main>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import {
   Phone,
   Video,
@@ -265,6 +398,7 @@ import {
   Reply,
   Undo2,
   Play,
+  Pause,
   X,
   Image,
   Paperclip,
@@ -273,6 +407,9 @@ import {
   Sparkles,
   Send,
   PhoneOff,
+  UploadCloud,
+  FileText,
+  Download,
 } from 'lucide-vue-next';
 import { useChatStore, MessageItem } from '../stores/chat';
 
@@ -283,10 +420,22 @@ const displayedQuote = ref<{ msgId: string; userName: string; content: string } 
 const copiedMsgId = ref<string | null>(null);
 const scrollContainer = ref<HTMLDivElement | null>(null);
 
-// Call state
-const activeCallType = ref<'audio' | 'video' | null>(null);
-const callTimer = ref('00:00:12');
+const imageInputRef = ref<HTMLInputElement | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+const isDragging = ref(false);
+const isRecording = ref(false);
 const isMuted = ref(false);
+const playingVoiceId = ref<string | null>(null);
+const lightboxImage = ref<string | null>(null);
+const showConvInfo = ref(false);
+
+const formattedCallDuration = computed(() => {
+  const d = chatStore.callDuration;
+  const mins = Math.floor(d / 60).toString().padStart(2, '0');
+  const secs = (d % 60).toString().padStart(2, '0');
+  return `00:${mins}:${secs}`;
+});
 
 const clearQuote = () => {
   activeQuote.value = null;
@@ -302,6 +451,10 @@ const handleSend = () => {
   inputContent.value = '';
   clearQuote();
 
+  scrollToBottom();
+};
+
+const scrollToBottom = () => {
   nextTick(() => {
     if (scrollContainer.value) {
       scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
@@ -309,7 +462,7 @@ const handleSend = () => {
   });
 };
 
-// Rule 10: Feedback Self-Extinguishing Copy Checkmark (2.5s)
+// Copy Checkmark Feedback (Rule 10: 2.5s self-extinguishing)
 const copyMessage = (msgId: string, content: string) => {
   navigator.clipboard.writeText(content);
   copiedMsgId.value = msgId;
@@ -330,15 +483,130 @@ const setQuote = (msg: MessageItem) => {
   activeQuote.value = quoteData;
 };
 
-const initiateCall = (type: 'audio' | 'video') => {
-  activeCallType.value = type;
+// Media & File Upload
+const triggerImageInput = () => {
+  imageInputRef.value?.click();
 };
 
-const endCall = () => {
-  activeCallType.value = null;
+const triggerFileInput = () => {
+  fileInputRef.value?.click();
 };
 
+const handleImageSelected = async (e: Event) => {
+  const files = (e.target as HTMLInputElement).files;
+  if (!files || files.length === 0) return;
+  await uploadAndSendFile(files[0], 'image');
+};
+
+const handleFileSelected = async (e: Event) => {
+  const files = (e.target as HTMLInputElement).files;
+  if (!files || files.length === 0) return;
+  await uploadAndSendFile(files[0], 'file');
+};
+
+const handleFileDrop = async (e: DragEvent) => {
+  isDragging.value = false;
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+
+  const file = files[0];
+  const isImg = file.type.startsWith('image/');
+  await uploadAndSendFile(file, isImg ? 'image' : 'file');
+};
+
+const uploadAndSendFile = async (file: File, type: 'image' | 'file') => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('name', file.name);
+
+  try {
+    const res = await fetch(`/api/file/upload?user_id=${chatStore.currentUserId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${chatStore.userToken}`,
+      },
+      body: formData,
+    });
+    const json = await res.json();
+    if (json.code === 0 && json.data) {
+      const fileUrl = json.data.file_url;
+      const formattedSize = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+
+      chatStore.sendMessage(fileUrl, undefined, type, {
+        fileName: file.name,
+        fileSize: formattedSize,
+      });
+      scrollToBottom();
+    }
+  } catch (err) {
+    console.error('File upload failed:', err);
+  }
+};
+
+// Voice Note Simulation
+const toggleVoiceRecording = () => {
+  if (isRecording.value) {
+    // Finish recording and send
+    isRecording.value = false;
+    const duration = Math.floor(Math.random() * 8) + 3;
+    chatStore.sendMessage('Voice Message', undefined, 'voice', { duration });
+    scrollToBottom();
+  } else {
+    isRecording.value = true;
+    setTimeout(() => {
+      if (isRecording.value) {
+        toggleVoiceRecording();
+      }
+    }, 4000);
+  }
+};
+
+const playVoice = (msgId: string) => {
+  if (playingVoiceId.value === msgId) {
+    playingVoiceId.value = null;
+  } else {
+    playingVoiceId.value = msgId;
+    setTimeout(() => {
+      if (playingVoiceId.value === msgId) {
+        playingVoiceId.value = null;
+      }
+    }, 4000);
+  }
+};
+
+// AI Summary Generation (Rule 4: Stream Blur Typography)
 const triggerAISummary = () => {
-  chatStore.sendMessage('AI Copilot: Summarizing the recent 5 key consensus items on the distributed SeqId engine...', undefined);
+  const summaryText = 'AI Intelligence Synthesis:\n• Monotonic SeqId generator proposal verified with Redis atomic counter.\n• Zero message loss guaranteed during cluster network partition.\n• Q3 Architecture review finalized and approved for canary deployment.';
+
+  const list = chatStore.activeMessages;
+  const nextSeq = list.length > 0 ? list[list.length - 1].seqId + 1 : 1;
+
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  const aiMsg: MessageItem = {
+    id: 'ai_' + Date.now(),
+    clientMsgId: 'c_ai_' + Date.now(),
+    seqId: nextSeq,
+    senderId: 0,
+    senderName: 'Mim AI Copilot',
+    content: summaryText,
+    msgType: 'ai_summary',
+    time: timeStr,
+    isMe: false,
+    status: 'read',
+  };
+
+  list.push(aiMsg);
+  scrollToBottom();
+};
+
+// WebRTC Calls
+const startCall = (type: 'audio' | 'video') => {
+  chatStore.initiateWebRTCCall(type);
+};
+
+const openLightbox = (url: string) => {
+  lightboxImage.value = url;
 };
 </script>
