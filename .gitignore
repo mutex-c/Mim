@@ -4,12 +4,16 @@
 
 # Go
 backend/bin/
+backend/uploads/
 *.exe
 *.test
 *.out
 *.db
 *.db-shm
 *.db-wal
+temp_*
+catalog.json
+article_parsed.json
 
 # Tauri
 **/src-tauri/target/

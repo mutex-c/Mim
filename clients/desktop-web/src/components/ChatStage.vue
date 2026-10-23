@@ -15,7 +15,7 @@
       class="absolute inset-4 rounded-2xl border-2 border-dashed border-blue-500 bg-blue-500/10 backdrop-blur-sm z-40 flex flex-col items-center justify-center pointer-events-none text-blue-600 dark:text-blue-400 gap-2"
     >
       <UploadCloud class="w-10 h-10 animate-bounce inline-icon" />
-      <span class="text-sm font-semibold">Drop files here to upload (SHA-256 Instant Upload)</span>
+      <span class="text-sm font-semibold">{{ langStore.t('chat.dropOverlay') }}</span>
     </div>
 
     <!-- Top Stage Header -->
@@ -36,7 +36,7 @@
               v-if="chatStore.activeConversation?.isOnline" 
               class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"
             ></span>
-            <span>{{ chatStore.activeConversation?.isOnline ? 'Online (E2EE Active)' : 'Cluster Encrypted' }}</span>
+            <span>{{ chatStore.activeConversation?.isOnline ? langStore.t('chat.onlineE2EE') : langStore.t('chat.clusterEncrypted') }}</span>
           </p>
         </div>
       </div>
@@ -46,21 +46,21 @@
         <button
           @click="startCall('audio')"
           class="w-9 h-9 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
-          title="Audio Call (WebRTC)"
+          :title="langStore.t('chat.audioCall')"
         >
           <Phone class="w-4 h-4 inline-icon" />
         </button>
         <button
           @click="startCall('video')"
           class="w-9 h-9 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
-          title="Video Call (WebRTC)"
+          :title="langStore.t('chat.videoCall')"
         >
           <Video class="w-4 h-4 inline-icon" />
         </button>
         <button
           @click="showConvInfo = !showConvInfo"
           class="w-9 h-9 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
-          title="Conversation Info"
+          :title="langStore.t('chat.convInfo')"
         >
           <MoreHorizontal class="w-4 h-4 inline-icon" />
         </button>
@@ -95,7 +95,7 @@
             <button
               @click="copyMessage(msg.id, msg.content)"
               class="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 text-mim-light-muted dark:text-mim-dark-muted transition-colors relative"
-              title="Copy"
+              :title="langStore.t('chat.copy')"
             >
               <Check v-if="copiedMsgId === msg.id" class="w-3.5 h-3.5 text-emerald-500 inline-icon" />
               <Copy v-else class="w-3.5 h-3.5 inline-icon" />
@@ -103,7 +103,7 @@
             <button
               @click="setQuote(msg)"
               class="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 text-mim-light-muted dark:text-mim-dark-muted transition-colors"
-              title="Reply / Quote"
+              :title="langStore.t('chat.reply')"
             >
               <Reply class="w-3.5 h-3.5 inline-icon" />
             </button>
@@ -111,7 +111,7 @@
               v-if="msg.isMe && !msg.isRevoked"
               @click="chatStore.revokeMessage(msg.id)"
               class="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 text-red-500 hover:text-red-600 transition-colors"
-              title="Recall Message"
+              :title="langStore.t('chat.recall')"
             >
               <Undo2 class="w-3.5 h-3.5 inline-icon" />
             </button>
@@ -137,7 +137,7 @@
             <div v-else-if="msg.msgType === 'image'" class="py-1">
               <img
                 :src="msg.content"
-                alt="Image message"
+                alt="Image"
                 class="max-w-xs max-h-60 rounded-xl object-cover cursor-pointer hover:opacity-95 shadow-sm transition-opacity"
                 @click="openLightbox(msg.content)"
               />
@@ -157,7 +157,7 @@
                 target="_blank"
                 download
                 class="w-7 h-7 rounded-lg flex items-center justify-center bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 transition-colors shrink-0"
-                title="Download File"
+                title="Download"
               >
                 <Download class="w-3.5 h-3.5 inline-icon" />
               </a>
@@ -189,7 +189,7 @@
             <div v-else-if="msg.msgType === 'ai_summary'" class="space-y-2 py-1 max-w-md">
               <div class="flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400">
                 <Sparkles class="w-4 h-4 inline-icon" />
-                <span>Mim AI Intelligence Summary</span>
+                <span>{{ langStore.t('chat.aiSynthesisTitle') }}</span>
               </div>
               <div class="text-xs leading-relaxed pretty-wrap">
                 <span
@@ -205,7 +205,7 @@
 
             <!-- Revoke Message -->
             <span v-else-if="msg.isRevoked">
-              {{ msg.content }}
+              {{ msg.isMe ? langStore.t('chat.recalledSelf') : langStore.t('chat.recalledPeer') }}
             </span>
           </div>
         </div>
@@ -231,7 +231,7 @@
         <div v-if="activeQuote || displayedQuote" class="pt-2">
           <div class="flex items-center justify-between p-2.5 rounded-lg bg-black/[0.03] dark:bg-white/[0.04] border-l-2 border-blue-500">
             <div class="text-xs truncate pr-4">
-              <span class="font-medium text-blue-600 dark:text-blue-400">Replying to {{ (activeQuote || displayedQuote)?.userName }}:</span>
+              <span class="font-medium text-blue-600 dark:text-blue-400">{{ langStore.t('chat.replyingTo') }} {{ (activeQuote || displayedQuote)?.userName }}:</span>
               <span class="text-mim-light-muted dark:text-mim-dark-muted ml-1">{{ (activeQuote || displayedQuote)?.content }}</span>
             </div>
             <button @click="clearQuote" class="text-mim-light-muted dark:text-mim-dark-muted hover:text-mim-light-text dark:hover:text-mim-dark-text">
@@ -250,7 +250,7 @@
           v-model="inputContent"
           @keydown.enter.exact.prevent="handleSend"
           rows="2"
-          placeholder="Write a message... (Press Enter to send, Shift+Enter for newline)"
+          :placeholder="langStore.t('chat.inputPlaceholder')"
           class="mim-input w-full p-2 bg-transparent text-sm text-mim-light-text dark:text-mim-dark-text placeholder-mim-light-muted dark:placeholder-mim-dark-muted resize-none border-none outline-none pretty-wrap"
         ></textarea>
 
@@ -261,14 +261,14 @@
             <button
               @click="triggerImageInput"
               class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
-              title="Attach Image"
+              :title="langStore.t('chat.attachImage')"
             >
               <Image class="w-4 h-4 inline-icon" />
             </button>
             <button
               @click="triggerFileInput"
               class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
-              title="Attach Document (Instant Upload / 秒传)"
+              :title="langStore.t('chat.attachFile')"
             >
               <Paperclip class="w-4 h-4 inline-icon" />
             </button>
@@ -276,17 +276,17 @@
               @click="toggleVoiceRecording"
               class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
               :class="isRecording ? 'bg-red-500/20 text-red-500 animate-pulse' : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
-              title="Voice Recording"
+              :title="langStore.t('chat.voiceRecording')"
             >
               <Mic class="w-4 h-4 inline-icon" />
             </button>
             <button
               @click="triggerAISummary"
               class="px-2 h-8 rounded-lg flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-600/10 dark:hover:bg-blue-500/15 transition-colors font-medium"
-              title="AI Chat Summary (Rule 4 Stream Blur)"
+              :title="langStore.t('chat.aiSummary')"
             >
               <Sparkles class="w-3.5 h-3.5 inline-icon" />
-              <span>AI Summary</span>
+              <span>{{ langStore.t('chat.aiSummary') }}</span>
             </button>
           </div>
 
@@ -296,7 +296,7 @@
             :disabled="!inputContent.trim()"
             class="px-4 h-8 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white text-xs font-medium flex items-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:cursor-not-allowed"
           >
-            <span>Send</span>
+            <span>{{ langStore.t('chat.send') }}</span>
             <Send class="w-3 h-3 inline-icon" />
           </button>
         </div>
@@ -330,7 +330,7 @@
         <button
           @click="chatStore.endActiveCall"
           class="w-14 h-14 rounded-full bg-red-600 hover:bg-red-500 flex items-center justify-center text-white transition-colors shadow-lg shadow-red-600/30"
-          title="Hang Up"
+          :title="langStore.t('chat.hangup')"
         >
           <PhoneOff class="w-6 h-6 inline-icon" />
         </button>
@@ -351,21 +351,21 @@
             {{ chatStore.incomingCall.callerName }}
           </h3>
           <p class="text-xs text-mim-light-muted dark:text-mim-dark-muted mt-0.5">
-            Incoming {{ chatStore.incomingCall.callType }} Call (WebRTC)...
+            {{ langStore.t('chat.incomingCallDesc') }}
           </p>
         </div>
         <div class="flex items-center gap-6 mt-2">
           <button
             @click="chatStore.rejectIncomingCall"
             class="w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center transition-colors shadow-lg shadow-red-600/30"
-            title="Decline"
+            :title="langStore.t('chat.decline')"
           >
             <PhoneOff class="w-5 h-5 inline-icon" />
           </button>
           <button
             @click="chatStore.acceptIncomingCall"
             class="w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center transition-colors shadow-lg shadow-emerald-600/30 animate-bounce"
-            title="Accept"
+            :title="langStore.t('chat.accept')"
           >
             <Phone class="w-5 h-5 inline-icon" />
           </button>
@@ -412,8 +412,11 @@ import {
   Download,
 } from 'lucide-vue-next';
 import { useChatStore, MessageItem } from '../stores/chat';
+import { useLangStore } from '../stores/lang';
 
 const chatStore = useChatStore();
+const langStore = useLangStore();
+
 const inputContent = ref('');
 const activeQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
 const displayedQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
@@ -546,10 +549,9 @@ const uploadAndSendFile = async (file: File, type: 'image' | 'file') => {
 // Voice Note Simulation
 const toggleVoiceRecording = () => {
   if (isRecording.value) {
-    // Finish recording and send
     isRecording.value = false;
     const duration = Math.floor(Math.random() * 8) + 3;
-    chatStore.sendMessage('Voice Message', undefined, 'voice', { duration });
+    chatStore.sendMessage(langStore.t('chat.voiceMessage'), undefined, 'voice', { duration });
     scrollToBottom();
   } else {
     isRecording.value = true;
@@ -576,7 +578,9 @@ const playVoice = (msgId: string) => {
 
 // AI Summary Generation (Rule 4: Stream Blur Typography)
 const triggerAISummary = () => {
-  const summaryText = 'AI Intelligence Synthesis:\n• Monotonic SeqId generator proposal verified with Redis atomic counter.\n• Zero message loss guaranteed during cluster network partition.\n• Q3 Architecture review finalized and approved for canary deployment.';
+  const summaryText = langStore.currentLang === 'zh'
+    ? 'Mim 智能协同提炼总结：\n• 单调递增 SeqId 架构已通过 Redis 原子计数器完成闭环验证。\n• 确认网络集群分区恢复期间零消息丢失保障。\n• Q3 架构评审顺利通过，已批准金丝雀集群上线。'
+    : 'Mim AI Intelligence Synthesis:\n• Monotonic SeqId generator proposal verified with Redis atomic counter.\n• Zero message loss guaranteed during cluster network partition.\n• Q3 Architecture review finalized and approved for canary deployment.';
 
   const list = chatStore.activeMessages;
   const nextSeq = list.length > 0 ? list[list.length - 1].seqId + 1 : 1;
@@ -589,7 +593,7 @@ const triggerAISummary = () => {
     clientMsgId: 'c_ai_' + Date.now(),
     seqId: nextSeq,
     senderId: 0,
-    senderName: 'Mim AI Copilot',
+    senderName: langStore.t('chat.aiCopilot'),
     content: summaryText,
     msgType: 'ai_summary',
     time: timeStr,

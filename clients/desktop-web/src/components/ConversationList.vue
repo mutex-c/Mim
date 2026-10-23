@@ -1,11 +1,11 @@
 <template>
-  <section class="w-80 h-full flex flex-col bg-mim-light-list dark:bg-mim-dark-list select-none">
+  <section class="w-80 h-full flex flex-col bg-mim-light-list dark:bg-mim-dark-list select-none border-r border-black/[0.04] dark:border-white/[0.04]">
     <!-- Header with Search -->
     <div class="p-4 pb-3 flex flex-col gap-3">
       <div class="flex items-center justify-between">
         <div>
           <h1 class="text-base font-semibold tracking-tight text-mim-light-text dark:text-mim-dark-text">
-            Messages
+            {{ langStore.t('conv.messages') }}
           </h1>
           <div class="flex items-center gap-1.5 mt-0.5">
             <span
@@ -17,7 +17,7 @@
             </span>
           </div>
         </div>
-        <button class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="New Chat">
+        <button class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 transition-colors" :title="langStore.t('conv.newChat')">
           <SquarePen class="w-4 h-4 inline-icon" />
         </button>
       </div>
@@ -28,7 +28,7 @@
         <input
           v-model="searchKeyword"
           type="text"
-          placeholder="Search conversations, files..."
+          :placeholder="langStore.t('conv.searchPlaceholder')"
           class="mim-input w-full h-9 pl-9 pr-3 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] text-sm text-mim-light-text dark:text-mim-dark-text placeholder-mim-light-muted dark:placeholder-mim-dark-muted border-none"
         />
       </div>
@@ -76,7 +76,7 @@
 
           <div class="flex items-center justify-between">
             <p class="text-xs text-mim-light-muted dark:text-mim-dark-muted truncate pr-2">
-              {{ conv.lastMessage }}
+              {{ conv.lastMessage || langStore.t('conv.noMessages') }}
             </p>
             <div class="flex items-center gap-1 shrink-0">
               <Pin v-if="conv.isPinned" class="w-3 h-3 text-mim-light-muted dark:text-mim-dark-muted inline-icon" />
@@ -99,8 +99,10 @@
 import { ref, computed } from 'vue';
 import { Search, SquarePen, Pin } from 'lucide-vue-next';
 import { useChatStore } from '../stores/chat';
+import { useLangStore } from '../stores/lang';
 
 const chatStore = useChatStore();
+const langStore = useLangStore();
 const searchKeyword = ref('');
 
 const filteredConversations = computed(() => {

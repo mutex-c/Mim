@@ -5,7 +5,7 @@
       <button
         @click="showAccountMenu = !showAccountMenu"
         class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-semibold text-sm shadow-sm hover:opacity-90 transition-opacity focus:outline-none"
-        title="Switch Active Account"
+        :title="langStore.t('nav.switchAccount')"
       >
         {{ chatStore.currentUserAvatar }}
       </button>
@@ -14,16 +14,16 @@
       <span
         class="absolute -bottom-0.5 -right-0.5 w-3 h-3 border-2 border-mim-light-dock dark:border-mim-dark-dock rounded-full transition-colors"
         :class="chatStore.isWsConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'"
-        :title="chatStore.isWsConnected ? 'Cluster WebSocket: Connected' : 'Cluster WebSocket: Connecting...'"
+        :title="chatStore.isWsConnected ? `${langStore.t('nav.backendWs')}: ${langStore.t('nav.online')}` : `${langStore.t('nav.backendWs')}: ${langStore.t('nav.offline')}`"
       ></span>
 
       <!-- Account Switcher Popover -->
       <div
         v-if="showAccountMenu"
-        class="absolute left-16 top-0 w-56 rounded-xl bg-mim-light-card dark:bg-mim-dark-card shadow-2xl border border-black/5 dark:border-white/10 p-2 z-50 flex flex-col gap-1"
+        class="absolute left-16 top-0 w-60 rounded-xl bg-mim-light-card dark:bg-mim-dark-card shadow-2xl border border-black/5 dark:border-white/10 p-2 z-50 flex flex-col gap-1"
       >
         <div class="px-2 py-1.5 text-[11px] font-semibold text-mim-light-muted dark:text-mim-dark-muted uppercase tracking-wider">
-          Switch Demo Account
+          {{ langStore.t('nav.switchAccount') }}
         </div>
         <button
           v-for="item in chatStore.demoUsers"
@@ -45,9 +45,9 @@
         </button>
 
         <div class="mt-1 pt-1.5 border-t border-black/5 dark:border-white/10 px-2 py-1 text-[10px] text-mim-light-muted dark:text-mim-dark-muted flex items-center justify-between">
-          <span>Backend WS:</span>
+          <span>{{ langStore.t('nav.backendWs') }}:</span>
           <span :class="chatStore.isWsConnected ? 'text-emerald-500' : 'text-amber-500 font-medium'">
-            {{ chatStore.isWsConnected ? 'Connected' : 'Offline' }}
+            {{ chatStore.isWsConnected ? langStore.t('nav.online') : langStore.t('nav.offline') }}
           </span>
         </div>
       </div>
@@ -71,13 +71,25 @@
         ></span>
         <!-- Tooltip -->
         <span class="absolute left-16 px-2.5 py-1 text-xs rounded-md bg-mim-light-card dark:bg-mim-dark-card shadow-card text-mim-light-text dark:text-mim-dark-text opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
-          {{ item.name }}
+          {{ langStore.t(`nav.${item.id}`) }}
         </span>
       </button>
     </nav>
 
-    <!-- Bottom Controls: Theme Toggle & Settings -->
+    <!-- Bottom Controls: Language Switcher, Theme Toggle & Settings -->
     <div class="flex flex-col gap-2 w-full px-2">
+      <!-- Language Toggle Button -->
+      <button
+        @click="langStore.toggleLang()"
+        class="w-full h-11 rounded-xl flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 transition-colors relative group font-medium text-xs"
+        :title="langStore.currentLang === 'zh' ? '切换为 English' : 'Switch to 简体中文'"
+      >
+        <Languages class="w-5 h-5 inline-icon text-blue-500 dark:text-blue-400" />
+        <span class="absolute left-16 px-2.5 py-1 text-xs rounded-md bg-mim-light-card dark:bg-mim-dark-card shadow-card text-mim-light-text dark:text-mim-dark-text opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
+          {{ langStore.currentLang === 'zh' ? '语言: 简体中文 (点击切 EN)' : 'Language: English (Click for 中文)' }}
+        </span>
+      </button>
+
       <!-- Theme Switcher Button -->
       <button
         @click="cycleTheme"
@@ -88,18 +100,19 @@
         <Monitor v-else class="w-5 h-5 inline-icon text-emerald-500" />
         
         <span class="absolute left-16 px-2.5 py-1 text-xs rounded-md bg-mim-light-card dark:bg-mim-dark-card shadow-card text-mim-light-text dark:text-mim-dark-text opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
-          Theme: {{ themeStore.currentMode.toUpperCase() }}
+          {{ langStore.t('nav.theme') }}: {{ themeStore.currentMode.toUpperCase() }}
         </span>
       </button>
 
+      <!-- Settings Button -->
       <button
         @click="$emit('open-settings')"
         class="w-full h-11 rounded-xl flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 transition-colors relative group"
-        title="Settings"
+        :title="langStore.t('nav.settings')"
       >
         <Settings class="w-5 h-5 inline-icon" />
         <span class="absolute left-16 px-2.5 py-1 text-xs rounded-md bg-mim-light-card dark:bg-mim-dark-card shadow-card text-mim-light-text dark:text-mim-dark-text opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
-          Settings
+          {{ langStore.t('nav.settings') }}
         </span>
       </button>
     </div>
@@ -107,21 +120,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { MessageSquare, Users, Phone, Settings, Sun, Moon, Monitor, Check } from 'lucide-vue-next';
+import { ref, computed } from 'vue';
+import { MessageSquare, Users, Phone, Settings, Sun, Moon, Monitor, Check, Languages } from 'lucide-vue-next';
 import { useThemeStore } from '../stores/theme';
 import { useChatStore, DemoUser } from '../stores/chat';
+import { useLangStore } from '../stores/lang';
 
 const themeStore = useThemeStore();
 const chatStore = useChatStore();
+const langStore = useLangStore();
 const showAccountMenu = ref(false);
 
 defineEmits(['open-settings']);
 
 const navItems = [
-  { id: 'chats', name: 'Conversations', icon: MessageSquare },
-  { id: 'contacts', name: 'Contacts & Teams', icon: Users },
-  { id: 'calls', name: 'Audio/Video Calls', icon: Phone },
+  { id: 'chats', icon: MessageSquare },
+  { id: 'contacts', icon: Users },
+  { id: 'calls', icon: Phone },
 ];
 
 const cycleTheme = () => {
