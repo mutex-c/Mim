@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -187,8 +188,8 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 		}
 	}
 
-	payloadBytes, _ := proto.Marshal(protoMsg)
-	pushFrame := protocol.NewFrame(protocol.CmdChatMessagePush, seqID, 0, payloadBytes)
+	payloadBytes, _ := json.Marshal(protoMsg)
+	pushFrame := protocol.NewFrame(protocol.CmdChatMessagePush, seqID, protocol.FlagJSON, payloadBytes)
 	encodedFrame, _ := pushFrame.Encode()
 
 	// 6. Push to Receiver (if online)
@@ -325,8 +326,8 @@ func (s *Service) RevokeMessage(userID, msgID uint64) error {
 			SeqId:          msg.SeqID,
 			SendTime:       time.Now().UnixMilli(),
 		}
-		payload, _ := proto.Marshal(protoRevoke)
-		frame := protocol.NewFrame(protocol.CmdRevokeNotify, msg.SeqID, 0, payload)
+		payload, _ := json.Marshal(protoRevoke)
+		frame := protocol.NewFrame(protocol.CmdRevokeNotify, msg.SeqID, protocol.FlagJSON, payload)
 		encoded, _ := frame.Encode()
 
 		if msg.ConvType == models.ConvTypeSingle {

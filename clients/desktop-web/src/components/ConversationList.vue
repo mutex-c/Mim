@@ -3,10 +3,21 @@
     <!-- Header with Search -->
     <div class="p-4 pb-3 flex flex-col gap-3">
       <div class="flex items-center justify-between">
-        <h1 class="text-lg font-semibold tracking-tight text-mim-light-text dark:text-mim-dark-text">
-          Messages
-        </h1>
-        <button class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+        <div>
+          <h1 class="text-base font-semibold tracking-tight text-mim-light-text dark:text-mim-dark-text">
+            Messages
+          </h1>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              :class="chatStore.isWsConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'"
+            ></span>
+            <span class="text-[11px] text-mim-light-muted dark:text-mim-dark-muted font-mono">
+              {{ chatStore.currentUserName }} (ID: {{ chatStore.currentUserId }})
+            </span>
+          </div>
+        </div>
+        <button class="w-8 h-8 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="New Chat">
           <SquarePen class="w-4 h-4 inline-icon" />
         </button>
       </div>

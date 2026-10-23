@@ -7,6 +7,9 @@ backend/bin/
 *.exe
 *.test
 *.out
+*.db
+*.db-shm
+*.db-wal
 
 # Tauri
 **/src-tauri/target/

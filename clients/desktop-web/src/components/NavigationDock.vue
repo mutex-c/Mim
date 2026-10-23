@@ -1,11 +1,56 @@
 <template>
-  <aside class="w-16 h-full flex flex-col items-center py-4 bg-mim-light-dock dark:bg-mim-dark-dock select-none z-20">
-    <!-- User Avatar -->
+  <aside class="w-16 h-full flex flex-col items-center py-4 bg-mim-light-dock dark:bg-mim-dark-dock select-none z-20 relative">
+    <!-- User Avatar & Quick Account Switcher -->
     <div class="relative mb-6">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-semibold text-sm shadow-sm cursor-pointer hover:opacity-90 transition-opacity">
-        AC
+      <button
+        @click="showAccountMenu = !showAccountMenu"
+        class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-semibold text-sm shadow-sm hover:opacity-90 transition-opacity focus:outline-none"
+        title="Switch Active Account"
+      >
+        {{ chatStore.currentUserAvatar }}
+      </button>
+
+      <!-- Status Indicator -->
+      <span
+        class="absolute -bottom-0.5 -right-0.5 w-3 h-3 border-2 border-mim-light-dock dark:border-mim-dark-dock rounded-full transition-colors"
+        :class="chatStore.isWsConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'"
+        :title="chatStore.isWsConnected ? 'Cluster WebSocket: Connected' : 'Cluster WebSocket: Connecting...'"
+      ></span>
+
+      <!-- Account Switcher Popover -->
+      <div
+        v-if="showAccountMenu"
+        class="absolute left-16 top-0 w-56 rounded-xl bg-mim-light-card dark:bg-mim-dark-card shadow-2xl border border-black/5 dark:border-white/10 p-2 z-50 flex flex-col gap-1"
+      >
+        <div class="px-2 py-1.5 text-[11px] font-semibold text-mim-light-muted dark:text-mim-dark-muted uppercase tracking-wider">
+          Switch Demo Account
+        </div>
+        <button
+          v-for="item in chatStore.demoUsers"
+          :key="item.user.id"
+          @click="selectUser(item)"
+          class="flex items-center gap-2.5 p-2 rounded-lg text-left text-xs transition-colors"
+          :class="chatStore.currentUserId === item.user.id
+            ? 'bg-blue-600/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold'
+            : 'text-mim-light-text dark:text-mim-dark-text hover:bg-black/5 dark:hover:bg-white/5'"
+        >
+          <div class="w-7 h-7 rounded-lg bg-blue-600/20 text-blue-600 dark:text-blue-400 font-semibold flex items-center justify-center text-xs shrink-0">
+            {{ item.user.avatar || item.user.nickname.substring(0, 2).toUpperCase() }}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="truncate">{{ item.user.nickname }}</div>
+            <div class="text-[10px] text-mim-light-muted dark:text-mim-dark-muted font-mono truncate">ID: {{ item.user.id }} ({{ item.user.account }})</div>
+          </div>
+          <Check v-if="chatStore.currentUserId === item.user.id" class="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0 inline-icon" />
+        </button>
+
+        <div class="mt-1 pt-1.5 border-t border-black/5 dark:border-white/10 px-2 py-1 text-[10px] text-mim-light-muted dark:text-mim-dark-muted flex items-center justify-between">
+          <span>Backend WS:</span>
+          <span :class="chatStore.isWsConnected ? 'text-emerald-500' : 'text-amber-500 font-medium'">
+            {{ chatStore.isWsConnected ? 'Connected' : 'Offline' }}
+          </span>
+        </div>
       </div>
-      <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-mim-light-dock dark:border-mim-dark-dock rounded-full"></span>
     </div>
 
     <!-- Main Navigation Icons -->
@@ -61,11 +106,14 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { MessageSquare, Users, Phone, Settings, Sun, Moon, Monitor } from 'lucide-vue-next';
+import { MessageSquare, Users, Phone, Settings, Sun, Moon, Monitor, Check } from 'lucide-vue-next';
 import { useThemeStore } from '../stores/theme';
+import { useChatStore, DemoUser } from '../stores/chat';
 
 const themeStore = useThemeStore();
+const chatStore = useChatStore();
 const activeTab = ref('chats');
+const showAccountMenu = ref(false);
 
 const navItems = [
   { id: 'chats', name: 'Conversations', icon: MessageSquare },
@@ -81,5 +129,10 @@ const cycleTheme = () => {
   } else {
     themeStore.setTheme('system');
   }
+};
+
+const selectUser = (u: DemoUser) => {
+  chatStore.switchAccount(u);
+  showAccountMenu.value = false;
 };
 </script>

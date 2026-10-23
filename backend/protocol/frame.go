@@ -42,6 +42,7 @@ const (
 	// Flags
 	FlagCompressed uint8 = 1 << 0
 	FlagEncrypted  uint8 = 1 << 1
+	FlagJSON       uint8 = 1 << 2
 )
 
 var (

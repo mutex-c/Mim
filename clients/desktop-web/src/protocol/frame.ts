@@ -3,6 +3,10 @@ export const CURRENT_VERSION = 0x01;
 // 24 Bytes: 2B Magic + 1B Version + 1B Flags + 2B CmdType + 2B Reserved + 8B SeqID + 4B Length + 4B Checksum
 export const HEADER_SIZE = 24;
 
+export const FLAG_COMPRESSED = 1 << 0;
+export const FLAG_ENCRYPTED = 1 << 1;
+export const FLAG_JSON = 1 << 2;
+
 export enum CmdType {
   HeartbeatPing = 0x0001,
   HeartbeatPong = 0x0002,
