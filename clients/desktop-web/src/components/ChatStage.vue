@@ -157,13 +157,13 @@
     <!-- Active Quote Bar (Rule 7: Grid 0fr -> 1fr accordion animation) -->
     <div class="mim-accordion px-6" :class="{ open: !!activeQuote }">
       <div class="mim-accordion-inner">
-        <div class="pt-2">
+        <div v-if="activeQuote || displayedQuote" class="pt-2">
           <div class="flex items-center justify-between p-2.5 rounded-lg bg-black/[0.03] dark:bg-white/[0.04] border-l-2 border-blue-500">
             <div class="text-xs truncate pr-4">
-              <span class="font-medium text-blue-600 dark:text-blue-400">Replying to {{ activeQuote?.userName }}:</span>
-              <span class="text-mim-light-muted dark:text-mim-dark-muted ml-1">{{ activeQuote?.content }}</span>
+              <span class="font-medium text-blue-600 dark:text-blue-400">Replying to {{ (activeQuote || displayedQuote)?.userName }}:</span>
+              <span class="text-mim-light-muted dark:text-mim-dark-muted ml-1">{{ (activeQuote || displayedQuote)?.content }}</span>
             </div>
-            <button @click="activeQuote = null" class="text-mim-light-muted dark:text-mim-dark-muted hover:text-mim-light-text dark:hover:text-mim-dark-text">
+            <button @click="clearQuote" class="text-mim-light-muted dark:text-mim-dark-muted hover:text-mim-light-text dark:hover:text-mim-dark-text">
               <X class="w-3.5 h-3.5 inline-icon" />
             </button>
           </div>
@@ -279,6 +279,7 @@ import { useChatStore, MessageItem } from '../stores/chat';
 const chatStore = useChatStore();
 const inputContent = ref('');
 const activeQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
+const displayedQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
 const copiedMsgId = ref<string | null>(null);
 const scrollContainer = ref<HTMLDivElement | null>(null);
 
@@ -287,12 +288,19 @@ const activeCallType = ref<'audio' | 'video' | null>(null);
 const callTimer = ref('00:00:12');
 const isMuted = ref(false);
 
+const clearQuote = () => {
+  activeQuote.value = null;
+  setTimeout(() => {
+    displayedQuote.value = null;
+  }, 250);
+};
+
 const handleSend = () => {
   if (!inputContent.value.trim()) return;
 
   chatStore.sendMessage(inputContent.value, activeQuote.value || undefined);
   inputContent.value = '';
-  activeQuote.value = null;
+  clearQuote();
 
   nextTick(() => {
     if (scrollContainer.value) {
@@ -313,11 +321,13 @@ const copyMessage = (msgId: string, content: string) => {
 };
 
 const setQuote = (msg: MessageItem) => {
-  activeQuote.value = {
+  const quoteData = {
     msgId: msg.id,
     userName: msg.senderName,
     content: msg.content,
   };
+  displayedQuote.value = quoteData;
+  activeQuote.value = quoteData;
 };
 
 const initiateCall = (type: 'audio' | 'video') => {
