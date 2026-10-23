@@ -39,7 +39,7 @@
       <div
         v-for="conv in filteredConversations"
         :key="conv.id"
-        @click="chatStore.selectConversation(conv.id)"
+        @click="selectConv(conv.id)"
         class="w-full p-2.5 rounded-xl flex items-center gap-3 cursor-pointer transition-all duration-150 relative"
         :class="chatStore.activeConvId === conv.id
           ? 'bg-black/[0.06] dark:bg-white/[0.08]'
@@ -97,13 +97,20 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { Search, SquarePen, Pin } from 'lucide-vue-next';
 import { useChatStore } from '../stores/chat';
 import { useLangStore } from '../stores/lang';
 
+const router = useRouter();
 const chatStore = useChatStore();
 const langStore = useLangStore();
 const searchKeyword = ref('');
+
+const selectConv = (id: string) => {
+  chatStore.selectConversation(id);
+  router.push(`/chats/${id}`);
+};
 
 const filteredConversations = computed(() => {
   if (!searchKeyword.value.trim()) {

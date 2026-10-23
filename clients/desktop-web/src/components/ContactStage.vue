@@ -223,10 +223,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { UserPlus, Users, MessageSquare, X } from 'lucide-vue-next';
 import { useChatStore } from '../stores/chat';
 import { useLangStore } from '../stores/lang';
 
+const router = useRouter();
 const chatStore = useChatStore();
 const langStore = useLangStore();
 const friends = ref<any[]>([]);
@@ -308,12 +310,12 @@ const openDirectChat = (friendId: number) => {
   const u2 = Math.max(chatStore.currentUserId, friendId);
   const convId = `${u1}_${u2}`;
   chatStore.selectConversation(convId);
-  chatStore.activeTab = 'chats';
+  router.push(`/chats/${convId}`);
 };
 
 const openGroupChat = (convId: string) => {
   chatStore.selectConversation(convId);
-  chatStore.activeTab = 'chats';
+  router.push(`/chats/${convId}`);
 };
 
 onMounted(() => {

@@ -58,15 +58,15 @@
       <button
         v-for="item in navItems"
         :key="item.id"
-        @click="chatStore.activeTab = item.id"
+        @click="navigateTo(item.path)"
         class="w-full h-11 rounded-xl flex items-center justify-center transition-all duration-150 relative group"
-        :class="chatStore.activeTab === item.id 
+        :class="isItemActive(item) 
           ? 'bg-blue-600/10 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 font-medium' 
           : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
       >
         <component :is="item.icon" class="w-5 h-5 inline-icon" />
         <span 
-          v-if="chatStore.activeTab === item.id" 
+          v-if="isItemActive(item)" 
           class="absolute left-0 top-3 bottom-3 w-1 bg-blue-600 dark:bg-blue-500 rounded-r-full"
         ></span>
         <!-- Tooltip -->
@@ -120,12 +120,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { MessageSquare, Users, Phone, Settings, Sun, Moon, Monitor, Check, Languages } from 'lucide-vue-next';
 import { useThemeStore } from '../stores/theme';
 import { useChatStore, DemoUser } from '../stores/chat';
 import { useLangStore } from '../stores/lang';
 
+const route = useRoute();
+const router = useRouter();
 const themeStore = useThemeStore();
 const chatStore = useChatStore();
 const langStore = useLangStore();
@@ -134,10 +137,26 @@ const showAccountMenu = ref(false);
 defineEmits(['open-settings']);
 
 const navItems = [
-  { id: 'chats', icon: MessageSquare },
-  { id: 'contacts', icon: Users },
-  { id: 'calls', icon: Phone },
+  { id: 'chats', path: '/chats', icon: MessageSquare },
+  { id: 'contacts', path: '/contacts', icon: Users },
+  { id: 'calls', path: '/calls', icon: Phone },
 ];
+
+const isItemActive = (item: { id: string; path: string }) => {
+  return route.path.startsWith(item.path);
+};
+
+const navigateTo = (path: string) => {
+  if (path === '/chats') {
+    if (chatStore.activeConvId) {
+      router.push(`/chats/${chatStore.activeConvId}`);
+    } else {
+      router.push('/chats');
+    }
+  } else {
+    router.push(path);
+  }
+};
 
 const cycleTheme = () => {
   if (themeStore.currentMode === 'system') {

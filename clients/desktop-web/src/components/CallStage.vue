@@ -83,10 +83,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { Phone, Video, PhoneCall } from 'lucide-vue-next';
 import { useChatStore } from '../stores/chat';
 import { useLangStore } from '../stores/lang';
 
+const router = useRouter();
 const chatStore = useChatStore();
 const langStore = useLangStore();
 
@@ -124,12 +126,14 @@ const fetchCallHistory = async () => {
 };
 
 const startQuickCall = (type: 'audio' | 'video') => {
-  chatStore.activeTab = 'chats';
+  const targetConv = chatStore.activeConvId || '1_2';
+  router.push(`/chats/${targetConv}`);
   chatStore.initiateWebRTCCall(type);
 };
 
 const redial = (call: any) => {
-  chatStore.activeTab = 'chats';
+  const targetConv = chatStore.activeConvId || '1_2';
+  router.push(`/chats/${targetConv}`);
   chatStore.initiateWebRTCCall(call.call_type === 'video' ? 'video' : 'audio');
 };
 
