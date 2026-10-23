@@ -1,0 +1,16 @@
+# Node
+**/node_modules/
+**/dist/
+
+# Go
+backend/bin/
+*.exe
+*.test
+*.out
+
+# Tauri
+**/src-tauri/target/
+
+# OS
+.DS_Store
+Thumbs.db

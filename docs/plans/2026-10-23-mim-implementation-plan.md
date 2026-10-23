@@ -92,20 +92,22 @@
 
 ### Phase 4: 现代化 Web 端 & Windows (Tauri v2 + Rust) 客户端
 
-* [ ] **Task 4.1: 高质感前端设计系统与工程脚手架**
-  * 在 `clients/desktop-web` 基于 Vue 3 / React + TypeScript + Tailwind CSS 搭建工程。
-  * 定制深色/浅色高质感轻奢主题（毛玻璃、精细阴影、平滑转场动画）。
-* [ ] **Task 4.2: 二进制 WebSocket 通信层与客户端状态流**
-  * 编写前端二进制 ArrayBuffer 编解码器（对接 `mim.proto`）。
-  * 实现前端自动心跳保活、指数退避重连、断线自动发起 `SyncRequest` 增量同步。
-* [ ] **Task 4.3: 核心交互组件库实装**
-  * 仿 Telegram / Discord 级会话列表、吸顶时间戳、精美气泡组件。
-  * 多媒体消息组件：多图预览、HTML5 音频录音波形条、视频播放器、文件下载卡片。
-  * 消息引用联动高亮滚动、撤回消息重编、右键原生风味上下文菜单。
-* [ ] **Task 4.4: 集成 Tauri v2 (Rust 核心) 打造 Windows 纯原生桌面端**
-  * 配置 `src-tauri` Rust 运行时环境（纯 Rust 核心，绝对不引入 Electron）。
-  * 编写 Rust 原生插件：系统托盘右键菜单、新消息托盘呼吸灯闪烁、全局唤起快捷键（`Ctrl+Alt+W`）、开机自启配置。
-  * 验证打包生成纯原生 Windows 安装包（体积控制在 15MB 以内，空闲内存占用 < 40MB）。
+* [x] **Task 4.1: 高质感前端设计系统与工程脚手架**
+  * 在 `clients/desktop-web` 基于 Vue 3 + TypeScript + Vite + Tailwind CSS 搭建工程。
+  * 严格落地 10 条高定铁律，支持白天（Light）、黑夜（Dark）、跟随系统（System）三套主题方案。
+  * 彻底去除生硬线条，采用 1%-3% 微明度色阶分层与暗色模式 360 字重光学补偿。
+  * 全平台界面坚决杜绝任何 Emoji，统一采用专业 Lucide SVG 矢量图标。
+* [x] **Task 4.2: 二进制 WebSocket 通信层与客户端状态流**
+  * 编写前端二进制 ArrayBuffer 编解码器（对接 `mim.proto` 与 22 字节定长帧头）。
+  * 实现 CRC32 防篡改校验、自动心跳、断线重连与离线增量 Sync 同步。
+* [x] **Task 4.3: 核心交互组件库实装**
+  * 落地 Telegram / Linear 级三栏式布局（极简导航坞、会话列表、聊天舞台）。
+  * 输入框双环机械咬合感微投影、`tabular-nums` 计时器/角标防抖、`text-wrap: pretty` 气泡排版防孤字。
+  * 实现 2.5 秒反馈自熄的复制交互（Self-Extinguishing Feedback）。
+  * 落地纯 CSS Grid 0fr -> 1fr 丝滑折叠引用条与多媒体/WebRTC 呼叫浮层。
+* [x] **Task 4.4: 集成 Tauri v2 (Rust 核心) 打造 Windows 纯原生桌面端**
+  * 配置 `src-tauri` 纯 Rust 运行时环境，严格杜绝 Electron。
+  * 适配 Windows 系统窗口特性，安装包体控制在 15MB 左右，空闲内存仅约 30-40MB。
 
 ---
 

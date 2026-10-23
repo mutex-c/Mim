@@ -1,0 +1,28 @@
+{
+  "name": "mim-desktop-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "pinia": "^2.3.1",
+    "lucide-vue-next": "^0.475.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.1.0",
+    "typescript": "^5.7.3",
+    "vue-tsc": "^2.2.0",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.5.1",
+    "autoprefixer": "^10.4.20",
+    "@tauri-apps/cli": "^2.2.0",
+    "@tauri-apps/api": "^2.2.0"
+  }
+}
