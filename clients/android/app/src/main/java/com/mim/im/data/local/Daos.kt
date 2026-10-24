@@ -28,11 +28,14 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE accountOwnerId = :accountOwnerId AND msgId = :msgId LIMIT 1")
     suspend fun getMessageById(accountOwnerId: String, msgId: String): MessageEntity?
+
+    @Query("DELETE FROM messages WHERE accountOwnerId = :accountOwnerId AND conversationId = :conversationId")
+    suspend fun deleteByConversation(accountOwnerId: String, conversationId: String)
 }
 
 @Dao
 interface ConversationDao {
-    @Query("SELECT * FROM conversations WHERE accountOwnerId = :accountOwnerId ORDER BY lastMessageTime DESC")
+    @Query("SELECT * FROM conversations WHERE accountOwnerId = :accountOwnerId ORDER BY isPinned DESC, lastMessageTime DESC")
     fun getAllConversations(accountOwnerId: String): Flow<List<ConversationEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -40,6 +43,12 @@ interface ConversationDao {
 
     @Query("UPDATE conversations SET unreadCount = 0 WHERE accountOwnerId = :accountOwnerId AND id = :id")
     suspend fun clearUnread(accountOwnerId: String, id: String)
+
+    @Query("UPDATE conversations SET isPinned = :isPinned WHERE accountOwnerId = :accountOwnerId AND id = :id")
+    suspend fun updatePinned(accountOwnerId: String, id: String, isPinned: Boolean)
+
+    @Query("UPDATE conversations SET isMuted = :isMuted WHERE accountOwnerId = :accountOwnerId AND id = :id")
+    suspend fun updateMuted(accountOwnerId: String, id: String, isMuted: Boolean)
 
     @Query("DELETE FROM conversations WHERE accountOwnerId = :accountOwnerId AND id = :id")
     suspend fun delete(accountOwnerId: String, id: String)

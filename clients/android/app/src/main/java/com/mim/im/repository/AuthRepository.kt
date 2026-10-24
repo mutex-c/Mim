@@ -25,7 +25,6 @@ class AuthRepository(
                     nickname = data.user.nickname,
                     avatar = data.user.avatar
                 )
-                // Connect WebSocket upon login
                 wsManager.connect()
                 Result.success(data.user)
             } else {
@@ -90,13 +89,53 @@ class AuthRepository(
         }
     }
 
-    suspend fun addFriend(targetUserId: Long): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun sendFriendRequest(targetUserId: Long, msg: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val resp = apiClient.service.addFriend(mapOf("friend_id" to targetUserId))
+            val resp = apiClient.service.addFriend(AddFriendReq(targetId = targetUserId, msg = msg))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                val message = resp.body()?.data?.get("msg")?.toString() ?: "申请已发送"
+                Result.success(message)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to send friend request"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getFriendRequests(): Result<List<FriendRequestDto>> = withContext(Dispatchers.IO) {
+        try {
+            val resp = apiClient.service.getFriendRequests()
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(resp.body()?.data ?: emptyList())
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to get friend requests"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun handleFriendRequest(requestId: Long, action: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resp = apiClient.service.handleFriendRequest(HandleFriendRequestReq(requestId = requestId, action = action))
             if (resp.isSuccessful && resp.body()?.code == 0) {
                 Result.success(Unit)
             } else {
-                Result.failure(Exception(resp.body()?.msg ?: "Failed to add friend"))
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to process friend request"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteFriend(friendId: Long): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val resp = apiClient.service.deleteFriend(DeleteFriendReq(friendId = friendId))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to delete friend"))
             }
         } catch (e: Exception) {
             Result.failure(e)

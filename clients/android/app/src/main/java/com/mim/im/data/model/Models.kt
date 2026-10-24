@@ -80,6 +80,8 @@ data class WsChatMessage(
     @SerializedName("receiver_id") val receiverId: Long = 0,
     @SerializedName("msg_type") val msgType: Int = MsgType.TEXT,
     val content: String = "",
+    @SerializedName("quoted_msg_id") val quotedMsgId: Long = 0,
+    @SerializedName("quoted_content") val quotedContent: String = "",
     @SerializedName("seq_id") val seqId: Long = 0,
     @SerializedName("send_time") val sendTime: Long = System.currentTimeMillis(),
     @SerializedName("is_encrypted") val isEncrypted: Boolean = false
@@ -143,18 +145,21 @@ data class GroupCreateRequest(
 
 data class GroupInfoDto(
     val id: Long = 0,
-    val name: String = "",
+    val title: String = "",
     val avatar: String = "",
-    val description: String = "",
+    val notice: String = "",
     @SerializedName("owner_id") val ownerId: Long = 0,
-    @SerializedName("member_count") val memberCount: Int = 1
+    @SerializedName("member_count") val memberCount: Int = 1,
+    @SerializedName("is_all_muted") val isAllMuted: Int = 0
 )
 
 data class GroupMemberDto(
     @SerializedName("user_id") val userId: Long = 0,
+    val account: String = "",
     val nickname: String = "",
     val avatar: String = "",
-    val role: Int = 0
+    val role: Int = 3, // 1: Owner, 2: Admin, 3: Member
+    @SerializedName("is_muted") val isMuted: Boolean = false
 )
 
 data class RevokeRequest(
@@ -164,4 +169,97 @@ data class RevokeRequest(
 
 data class ReadConversationRequest(
     @SerializedName("conversation_id") val conversationId: String = ""
+)
+
+
+// --- Friend Request & Relationship DTOs ---
+
+data class FriendRequestDto(
+    val id: Long = 0,
+    @SerializedName("from_user_id") val fromUserId: Long = 0,
+    @SerializedName("to_user_id") val toUserId: Long = 0,
+    @SerializedName("from_nickname") val fromNickname: String = "",
+    @SerializedName("from_avatar") val fromAvatar: String = "",
+    @SerializedName("from_account") val fromAccount: String = "",
+    val message: String = "",
+    val status: Int = 1,
+    @SerializedName("created_at") val createdAt: String = ""
+)
+
+data class HandleFriendRequestReq(
+    @SerializedName("request_id") val requestId: Long,
+    val action: Int
+)
+
+data class AddFriendReq(
+    @SerializedName("target_id") val targetId: Long,
+    val msg: String = ""
+)
+
+data class DeleteFriendReq(
+    @SerializedName("friend_id") val friendId: Long
+)
+
+// --- Group Management DTOs ---
+
+data class CreateGroupReq(
+    val title: String,
+    val avatar: String = "",
+    val notice: String = "",
+    @SerializedName("member_ids") val memberIds: List<Long> = emptyList()
+)
+
+data class UpdateGroupReq(
+    @SerializedName("group_id") val groupId: Long,
+    val title: String = "",
+    val notice: String = "",
+    val avatar: String = "",
+    @SerializedName("is_all_muted") val isAllMuted: Int = 0
+)
+
+data class InviteGroupReq(
+    @SerializedName("group_id") val groupId: Long,
+    @SerializedName("member_ids") val memberIds: List<Long>
+)
+
+data class MuteMemberReq(
+    @SerializedName("group_id") val groupId: Long,
+    @SerializedName("target_id") val targetId: Long,
+    val duration: Int
+)
+
+data class KickMemberReq(
+    @SerializedName("group_id") val groupId: Long,
+    @SerializedName("target_id") val targetId: Long
+)
+
+data class GroupIdReq(
+    @SerializedName("group_id") val groupId: Long
+)
+
+data class SetGroupRoleReq(
+    @SerializedName("group_id") val groupId: Long,
+    @SerializedName("target_id") val targetId: Long,
+    val role: Int
+)
+
+data class TransferGroupOwnerReq(
+    @SerializedName("group_id") val groupId: Long,
+    @SerializedName("new_owner_id") val newOwnerId: Long
+)
+
+// --- Conversation Management DTOs ---
+
+data class PinConversationReq(
+    @SerializedName("conversation_id") val conversationId: String,
+    @SerializedName("is_pinned") val isPinned: Int
+)
+
+data class MuteConversationReq(
+    @SerializedName("conversation_id") val conversationId: String,
+    @SerializedName("is_muted") val isMuted: Int
+)
+
+data class ConvActionReq(
+    @SerializedName("conversation_id") val conversationId: String
 )

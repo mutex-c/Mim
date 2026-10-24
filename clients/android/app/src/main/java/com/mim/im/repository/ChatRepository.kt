@@ -73,7 +73,7 @@ class ChatRepository(
         var fileSize: Long = 0
         var mediaUrl: String? = null
 
-        if (wsMsg.msgType == MsgType.FILE || wsMsg.msgType == MsgType.IMAGE) {
+        if (wsMsg.msgType == MsgType.FILE || wsMsg.msgType == MsgType.IMAGE || wsMsg.msgType == MsgType.VOICE) {
             try {
                 val meta = gson.fromJson(wsMsg.content, FileContentMeta::class.java)
                 fileName = meta.name
@@ -91,11 +91,14 @@ class ChatRepository(
             convType = if (wsMsg.convType == ConvType.GROUP) "group" else "single",
             contentType = when (wsMsg.msgType) {
                 MsgType.IMAGE -> "image"
+                MsgType.VOICE -> "voice"
                 MsgType.FILE -> "file"
                 MsgType.REVOKE -> "revoked"
                 else -> "text"
             },
             content = wsMsg.content,
+            quotedMsgId = if (wsMsg.quotedMsgId > 0) wsMsg.quotedMsgId.toString() else "",
+            quotedContent = wsMsg.quotedContent,
             mediaUrl = mediaUrl,
             fileName = fileName,
             fileSize = fileSize,
@@ -109,6 +112,7 @@ class ChatRepository(
         val existingConv = conversationDao.getConversationById(ownerId, wsMsg.conversationId)
         val preview = when (wsMsg.msgType) {
             MsgType.IMAGE -> "[图片]"
+            MsgType.VOICE -> "[语音留言]"
             MsgType.FILE -> "[文件] ${fileName ?: ""}"
             MsgType.REVOKE -> "[对方撤回了一条消息]"
             else -> wsMsg.content
@@ -123,7 +127,9 @@ class ChatRepository(
             avatar = existingConv?.avatar ?: "",
             lastMessage = preview,
             lastMessageTime = wsMsg.sendTime,
-            unreadCount = (existingConv?.unreadCount ?: 0) + 1
+            unreadCount = (existingConv?.unreadCount ?: 0) + 1,
+            isPinned = existingConv?.isPinned ?: false,
+            isMuted = existingConv?.isMuted ?: false
         )
         conversationDao.insertOrUpdate(updatedConv)
     }
@@ -150,6 +156,10 @@ class ChatRepository(
         return messageDao.getMessagesByConversation(currentOwnerId, conversationId)
     }
 
+    suspend fun getMessageById(msgId: String): MessageEntity? {
+        return messageDao.getMessageById(currentOwnerId, msgId)
+    }
+
     suspend fun refreshConversations() {
         val ownerId = currentOwnerId
         try {
@@ -166,7 +176,9 @@ class ChatRepository(
                         avatar = dto.avatarText ?: "",
                         lastMessage = dto.lastMsgPreview,
                         lastMessageTime = System.currentTimeMillis(),
-                        unreadCount = dto.unreadCount
+                        unreadCount = dto.unreadCount,
+                        isPinned = dto.isPinned == 1,
+                        isMuted = dto.isMuted == 1
                     )
                 }
                 for (conv in entities) {
@@ -182,7 +194,9 @@ class ChatRepository(
         conversationId: String,
         convType: Int,
         targetId: Long,
-        text: String
+        text: String,
+        quotedMsgId: Long = 0L,
+        quotedContent: String = ""
     ): Boolean {
         val ownerId = currentOwnerId
         val clientMsgId = UUID.randomUUID().toString()
@@ -197,6 +211,8 @@ class ChatRepository(
             convType = if (convType == ConvType.GROUP) "group" else "single",
             contentType = "text",
             content = text,
+            quotedMsgId = if (quotedMsgId > 0) quotedMsgId.toString() else "",
+            quotedContent = quotedContent,
             seq = 0,
             status = "sending",
             timestamp = System.currentTimeMillis()
@@ -212,6 +228,8 @@ class ChatRepository(
             receiverId = targetId,
             msgType = MsgType.TEXT,
             content = text,
+            quotedMsgId = quotedMsgId,
+            quotedContent = quotedContent,
             sendTime = System.currentTimeMillis()
         )
         val sent = wsManager.sendMessage(wsMsg)
@@ -226,7 +244,9 @@ class ChatRepository(
         convType: Int,
         targetId: Long,
         file: File,
-        mimeType: String = "application/octet-stream"
+        mimeType: String = "application/octet-stream",
+        quotedMsgId: Long = 0L,
+        quotedContent: String = ""
     ): Boolean {
         val ownerId = currentOwnerId
         val clientMsgId = UUID.randomUUID().toString()
@@ -251,6 +271,19 @@ class ChatRepository(
         val meta = resp.body()?.data ?: return false
         val contentJson = gson.toJson(meta)
         val isImage = mimeType.startsWith("image/")
+        val isVoice = mimeType.startsWith("audio/")
+
+        val contentType = when {
+            isImage -> "image"
+            isVoice -> "voice"
+            else -> "file"
+        }
+
+        val msgType = when {
+            isImage -> MsgType.IMAGE
+            isVoice -> MsgType.VOICE
+            else -> MsgType.FILE
+        }
 
         val entity = MessageEntity(
             accountOwnerId = ownerId,
@@ -259,8 +292,10 @@ class ChatRepository(
             senderId = senderId.toString(),
             receiverId = targetId.toString(),
             convType = if (convType == ConvType.GROUP) "group" else "single",
-            contentType = if (isImage) "image" else "file",
+            contentType = contentType,
             content = contentJson,
+            quotedMsgId = if (quotedMsgId > 0) quotedMsgId.toString() else "",
+            quotedContent = quotedContent,
             mediaUrl = meta.url,
             fileName = meta.name,
             fileSize = meta.size,
@@ -279,8 +314,10 @@ class ChatRepository(
             convType = convType,
             senderId = senderId,
             receiverId = targetId,
-            msgType = if (isImage) MsgType.IMAGE else MsgType.FILE,
+            msgType = msgType,
             content = contentJson,
+            quotedMsgId = quotedMsgId,
+            quotedContent = quotedContent,
             sendTime = System.currentTimeMillis()
         )
         return wsManager.sendMessage(wsMsg)
@@ -299,7 +336,6 @@ class ChatRepository(
 
         withContext(Dispatchers.IO) {
             try {
-                // Ensure full URL if relative
                 val downloadUrl = if (url.startsWith("http://") || url.startsWith("https://")) {
                     url
                 } else {
@@ -341,7 +377,6 @@ class ChatRepository(
                     }
                 }
 
-                // Update database
                 messageDao.updateDownloadStatus(currentOwnerId, msg.msgId, true, targetFile.absolutePath)
                 withContext(Dispatchers.Main) { onSuccess(targetFile) }
             } catch (e: Exception) {
@@ -376,5 +411,226 @@ class ChatRepository(
         try {
             apiClient.service.readConversation(ReadConversationRequest(conversationId))
         } catch (_: Exception) {}
+    }
+
+    // --- Conversation Actions ---
+
+    suspend fun pinConversation(conversationId: String, isPinned: Boolean): Result<Unit> {
+        return try {
+            val resp = apiClient.service.pinConversation(PinConversationReq(conversationId, if (isPinned) 1 else 0))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                conversationDao.updatePinned(currentOwnerId, conversationId, isPinned)
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to pin conversation"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun muteConversation(conversationId: String, isMuted: Boolean): Result<Unit> {
+        return try {
+            val resp = apiClient.service.muteConversation(MuteConversationReq(conversationId, if (isMuted) 1 else 0))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                conversationDao.updateMuted(currentOwnerId, conversationId, isMuted)
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to mute conversation"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteConversation(conversationId: String): Result<Unit> {
+        return try {
+            val resp = apiClient.service.deleteConversation(ConvActionReq(conversationId))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                conversationDao.delete(currentOwnerId, conversationId)
+                messageDao.deleteByConversation(currentOwnerId, conversationId)
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to delete conversation"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun clearMessages(conversationId: String): Result<Unit> {
+        return try {
+            val resp = apiClient.service.clearMessages(ConvActionReq(conversationId))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                messageDao.deleteByConversation(currentOwnerId, conversationId)
+                val existing = conversationDao.getConversationById(currentOwnerId, conversationId)
+                if (existing != null) {
+                    conversationDao.insertOrUpdate(existing.copy(lastMessage = "", unreadCount = 0))
+                }
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to clear messages"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // --- Group Management API Calls ---
+
+    suspend fun createGroup(title: String, memberIds: List<Long>): Result<GroupInfoDto> {
+        return try {
+            val resp = apiClient.service.createGroup(CreateGroupReq(title = title, memberIds = memberIds))
+            if (resp.isSuccessful && resp.body()?.code == 0 && resp.body()?.data != null) {
+                Result.success(resp.body()!!.data!!)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to create group"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getGroupInfo(groupId: Long): Result<GroupInfoDto> {
+        return try {
+            val resp = apiClient.service.getGroupInfo(groupId)
+            if (resp.isSuccessful && resp.body()?.code == 0 && resp.body()?.data != null) {
+                Result.success(resp.body()!!.data!!)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to get group info"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getGroupMembers(groupId: Long): Result<List<GroupMemberDto>> {
+        return try {
+            val resp = apiClient.service.getGroupMembers(groupId)
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(resp.body()?.data ?: emptyList())
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to fetch members"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateGroup(
+        groupId: Long,
+        title: String = "",
+        notice: String = "",
+        avatar: String = "",
+        isAllMuted: Int = 0
+    ): Result<Unit> {
+        return try {
+            val req = UpdateGroupReq(
+                groupId = groupId,
+                title = title,
+                notice = notice,
+                avatar = avatar,
+                isAllMuted = isAllMuted
+            )
+            val resp = apiClient.service.updateGroup(req)
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to update group"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun inviteGroup(groupId: Long, memberIds: List<Long>): Result<Unit> {
+        return try {
+            val resp = apiClient.service.inviteGroup(InviteGroupReq(groupId = groupId, memberIds = memberIds))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to invite members"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun muteMember(groupId: Long, targetId: Long, durationSeconds: Int): Result<Unit> {
+        return try {
+            val resp = apiClient.service.muteMember(MuteMemberReq(groupId = groupId, targetId = targetId, duration = durationSeconds))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to mute member"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun kickMember(groupId: Long, targetId: Long): Result<Unit> {
+        return try {
+            val resp = apiClient.service.kickMember(KickMemberReq(groupId = groupId, targetId = targetId))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to kick member"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setGroupRole(groupId: Long, targetId: Long, role: Int): Result<Unit> {
+        return try {
+            val resp = apiClient.service.setGroupRole(SetGroupRoleReq(groupId = groupId, targetId = targetId, role = role))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to set member role"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun transferGroupOwner(groupId: Long, newOwnerId: Long): Result<Unit> {
+        return try {
+            val resp = apiClient.service.transferGroupOwner(TransferGroupOwnerReq(groupId = groupId, newOwnerId = newOwnerId))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to transfer ownership"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun disbandGroup(groupId: Long): Result<Unit> {
+        return try {
+            val resp = apiClient.service.disbandGroup(GroupIdReq(groupId = groupId))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to disband group"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun quitGroup(groupId: Long): Result<Unit> {
+        return try {
+            val resp = apiClient.service.quitGroup(GroupIdReq(groupId = groupId))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to quit group"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

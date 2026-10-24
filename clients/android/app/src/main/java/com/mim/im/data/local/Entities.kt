@@ -24,6 +24,8 @@ data class MessageEntity(
     val convType: String = "single",
     val contentType: String = "text",
     val content: String = "",
+    val quotedMsgId: String = "",
+    val quotedContent: String = "",
     val mediaUrl: String? = null,
     val fileName: String? = null,
     val fileSize: Long = 0,
@@ -50,5 +52,7 @@ data class ConversationEntity(
     val avatar: String = "",
     val lastMessage: String = "",
     val lastMessageTime: Long = System.currentTimeMillis(),
-    val unreadCount: Int = 0
+    val unreadCount: Int = 0,
+    val isPinned: Boolean = false,
+    val isMuted: Boolean = false
 )
