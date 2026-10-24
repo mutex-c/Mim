@@ -21,3 +21,11 @@ article_parsed.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Android
+**/clients/android/.gradle/
+**/clients/android/app/build/
+**/clients/android/build/
+**/clients/android/local.properties
+**/clients/android/.idea/
+*.apk

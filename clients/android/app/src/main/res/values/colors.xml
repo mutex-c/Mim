@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="mim_blue">#2563EB</color>
+    <color name="mim_blue_dark">#1D4ED8</color>
+    <color name="mim_bg_light">#F8FAFC</color>
+    <color name="mim_bg_dark">#0F172A</color>
+</resources>
