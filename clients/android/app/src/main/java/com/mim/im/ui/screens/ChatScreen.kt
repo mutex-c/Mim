@@ -39,10 +39,14 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.mim.im.data.local.MessageEntity
 import com.mim.im.data.model.ConvType
+import com.mim.im.data.model.GroupInfoDto
+import com.mim.im.data.model.GroupMemberDto
+import com.mim.im.repository.AuthRepository
 import com.mim.im.repository.ChatRepository
-import com.mim.im.ui.components.MimAvatar
-import com.mim.im.ui.components.MimFileCard
+import com.mim.im.ui.components.*
 import com.mim.im.ui.theme.MimTheme
+import com.mim.im.utils.AudioPlayerHelper
+import com.mim.im.utils.AudioRecorderHelper
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
@@ -56,15 +60,54 @@ fun ChatScreen(
     targetId: Long,
     isGroup: Boolean,
     chatRepo: ChatRepository,
+    authRepo: AuthRepository,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    val recorderHelper = remember { AudioRecorderHelper(context) }
+    val playerHelper = remember { AudioPlayerHelper(context) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            playerHelper.release()
+        }
+    }
+
     val messages by chatRepo.getMessages(conversationId).collectAsState(initial = emptyList())
     var inputText by remember { mutableStateOf("") }
+    var isVoiceInputMode by remember { mutableStateOf(false) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
+    var showGroupSettings by remember { mutableStateOf(false) }
+    var replyingToMessage by remember { mutableStateOf<MessageEntity?>(null) }
+
+    // Group info state for mute checking
+    var groupInfo by remember { mutableStateOf<GroupInfoDto?>(null) }
+    var myMemberInfo by remember { mutableStateOf<GroupMemberDto?>(null) }
+
+    LaunchedEffect(conversationId, isGroup) {
+        if (isGroup) {
+            val infoRes = chatRepo.getGroupInfo(targetId)
+            if (infoRes.isSuccess) groupInfo = infoRes.getOrNull()
+
+            val membersRes = chatRepo.getGroupMembers(targetId)
+            if (membersRes.isSuccess) {
+                myMemberInfo = membersRes.getOrDefault(emptyList()).find { it.userId.toString() == chatRepo.currentOwnerId }
+            }
+        }
+    }
+
+    val isUserMutedInGroup = remember(groupInfo, myMemberInfo) {
+        if (!isGroup) false
+        else {
+            val role = myMemberInfo?.role ?: 3
+            val isStaff = (role == 1 || role == 2)
+            if (isStaff) false
+            else (groupInfo?.isAllMuted == 1 || (myMemberInfo?.isMuted == true))
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -87,8 +130,11 @@ fun ChatScreen(
                         convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
                         targetId = targetId,
                         file = tempFile,
-                        mimeType = mimeType
+                        mimeType = mimeType,
+                        quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
+                        quotedContent = replyingToMessage?.content ?: ""
                     )
+                    replyingToMessage = null
                 }
             }
         }
@@ -105,8 +151,11 @@ fun ChatScreen(
                         convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
                         targetId = targetId,
                         file = tempFile,
-                        mimeType = mimeType
+                        mimeType = mimeType,
+                        quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
+                        quotedContent = replyingToMessage?.content ?: ""
                     )
+                    replyingToMessage = null
                 }
             }
         }
@@ -163,11 +212,21 @@ fun ChatScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isGroup) "群聊成员协同" else "端到端加密安全会话",
+                                text = if (isGroup) "群聊安全协同" else "端到端加密安全会话",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = MimTheme.colors.textMuted,
                                     fontSize = 11.sp
                                 )
+                            )
+                        }
+                    }
+
+                    if (isGroup) {
+                        IconButton(onClick = { showGroupSettings = true }) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "群设置",
+                                tint = MimTheme.colors.textPrimary
                             )
                         }
                     }
@@ -181,77 +240,148 @@ fun ChatScreen(
                     .navigationBarsPadding()
                     .imePadding()
             ) {
-                Surface(
-                    color = MimTheme.colors.surfaceElevated,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(0.5.dp, MimTheme.colors.border, RoundedCornerShape(0.dp))
-                ) {
-                    Row(
+                // 1. Quoted Message Banner (if active)
+                replyingToMessage?.let { quoted ->
+                    QuoteReplyBanner(
+                        quotedMessage = quoted,
+                        onDismiss = { replyingToMessage = null }
+                    )
+                }
+
+                // 2. Muted Warning Bar or Input Bar
+                if (isUserMutedInGroup) {
+                    Surface(
+                        color = MimTheme.colors.surfaceElevated,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .border(0.5.dp, MimTheme.colors.border, RoundedCornerShape(0.dp))
+                            .padding(16.dp)
                     ) {
-                        IconButton(
-                            onClick = { showAttachmentSheet = !showAttachmentSheet },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (showAttachmentSheet) Icons.Default.Close else Icons.Default.AddCircleOutline,
-                                contentDescription = "多媒体附件",
-                                tint = MimTheme.colors.accent,
-                                modifier = Modifier.size(24.dp)
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (groupInfo?.isAllMuted == 1) "全员禁言中，仅管理员可发言" else "您已被管理员禁言",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MimTheme.colors.textMuted,
+                                    fontWeight = FontWeight.Medium
+                                )
                             )
                         }
-
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = { Text("输入消息...", color = MimTheme.colors.textMuted) },
-                            shape = RoundedCornerShape(22.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MimTheme.colors.accent,
-                                unfocusedBorderColor = MimTheme.colors.border,
-                                focusedContainerColor = MimTheme.colors.inputBackground,
-                                unfocusedContainerColor = MimTheme.colors.inputBackground,
-                                focusedTextColor = MimTheme.colors.textPrimary,
-                                unfocusedTextColor = MimTheme.colors.textPrimary
-                            ),
-                            maxLines = 4,
+                    }
+                } else {
+                    Surface(
+                        color = MimTheme.colors.surfaceElevated,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(0.5.dp, MimTheme.colors.border, RoundedCornerShape(0.dp))
+                    ) {
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 4.dp)
-                        )
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Mic / Keyboard toggle
+                            IconButton(
+                                onClick = { isVoiceInputMode = !isVoiceInputMode },
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isVoiceInputMode) Icons.Default.Keyboard else Icons.Default.Mic,
+                                    contentDescription = "切换语音/文字",
+                                    tint = MimTheme.colors.accent,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
 
-                        val canSend = inputText.isNotBlank()
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(if (canSend) MimTheme.colors.accent else MimTheme.colors.surface)
-                                .clickable(enabled = canSend) {
-                                    val text = inputText.trim()
-                                    if (text.isNotEmpty()) {
+                            if (isVoiceInputMode) {
+                                // Hold to talk voice bar
+                                VoiceRecordBar(
+                                    recorderHelper = recorderHelper,
+                                    onVoiceRecorded = { recordedFile, _ ->
                                         scope.launch {
-                                            chatRepo.sendTextMessage(
+                                            chatRepo.sendFileMessage(
                                                 conversationId = conversationId,
                                                 convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
                                                 targetId = targetId,
-                                                text = text
+                                                file = recordedFile,
+                                                mimeType = "audio/mp4",
+                                                quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
+                                                quotedContent = replyingToMessage?.content ?: ""
                                             )
+                                            replyingToMessage = null
                                         }
-                                        inputText = ""
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "发送",
-                                tint = if (canSend) Color.White else MimTheme.colors.textMuted,
-                                modifier = Modifier.size(20.dp)
-                            )
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 4.dp)
+                                )
+                            } else {
+                                OutlinedTextField(
+                                    value = inputText,
+                                    onValueChange = { inputText = it },
+                                    placeholder = { Text("输入消息...", color = MimTheme.colors.textMuted) },
+                                    shape = RoundedCornerShape(22.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MimTheme.colors.accent,
+                                        unfocusedBorderColor = MimTheme.colors.border,
+                                        focusedContainerColor = MimTheme.colors.inputBackground,
+                                        unfocusedContainerColor = MimTheme.colors.inputBackground,
+                                        focusedTextColor = MimTheme.colors.textPrimary,
+                                        unfocusedTextColor = MimTheme.colors.textPrimary
+                                    ),
+                                    maxLines = 4,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 4.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showAttachmentSheet = !showAttachmentSheet },
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (showAttachmentSheet) Icons.Default.Close else Icons.Default.AddCircleOutline,
+                                    contentDescription = "多媒体附件",
+                                    tint = MimTheme.colors.accent,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            if (!isVoiceInputMode) {
+                                val canSend = inputText.isNotBlank()
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(if (canSend) MimTheme.colors.accent else MimTheme.colors.surface)
+                                        .clickable(enabled = canSend) {
+                                            val text = inputText.trim()
+                                            if (text.isNotEmpty()) {
+                                                scope.launch {
+                                                    chatRepo.sendTextMessage(
+                                                        conversationId = conversationId,
+                                                        convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
+                                                        targetId = targetId,
+                                                        text = text,
+                                                        quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
+                                                        quotedContent = replyingToMessage?.content ?: ""
+                                                    )
+                                                }
+                                                inputText = ""
+                                                replyingToMessage = null
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = "发送",
+                                        tint = if (canSend) Color.White else MimTheme.colors.textMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -305,6 +435,8 @@ fun ChatScreen(
                 MessageBubbleItem(
                     msg = msg,
                     isSelf = isSelf,
+                    playerHelper = playerHelper,
+                    onQuote = { entity -> replyingToMessage = entity },
                     onDownload = { entity, onProgress, onSuccess, onError ->
                         scope.launch {
                             chatRepo.downloadFile(entity, onProgress, onSuccess, onError)
@@ -317,10 +449,31 @@ fun ChatScreen(
                                 Toast.makeText(context, "撤回失败（超出时限或已被撤回）", Toast.LENGTH_SHORT).show()
                             }
                         }
+                    },
+                    onScrollToMessage = { targetMsgId ->
+                        val index = messages.indexOfFirst { it.msgId == targetMsgId }
+                        if (index >= 0) {
+                            scope.launch { listState.animateScrollToItem(index) }
+                        }
                     }
                 )
             }
         }
+    }
+
+    // Group Settings Bottom Sheet
+    if (showGroupSettings && isGroup) {
+        GroupSettingsSheet(
+            groupId = targetId,
+            currentOwnerId = chatRepo.currentOwnerId,
+            chatRepo = chatRepo,
+            authRepo = authRepo,
+            onDismiss = { showGroupSettings = false },
+            onGroupDisbandedOrQuit = {
+                showGroupSettings = false
+                onBack()
+            }
+        )
     }
 }
 
@@ -368,8 +521,11 @@ fun AttachmentOptionItem(
 fun MessageBubbleItem(
     msg: MessageEntity,
     isSelf: Boolean,
+    playerHelper: AudioPlayerHelper,
+    onQuote: (MessageEntity) -> Unit,
     onDownload: (MessageEntity, (Float) -> Unit, (File) -> Unit, (String) -> Unit) -> Unit,
-    onRevoke: (MessageEntity) -> Unit
+    onRevoke: (MessageEntity) -> Unit,
+    onScrollToMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
     var showMenu by remember { mutableStateOf(false) }
@@ -407,7 +563,7 @@ fun MessageBubbleItem(
     ) {
         if (!isSelf) {
             MimAvatar(
-                name = msg.senderId.takeLast(2),
+                name = msg.senderName.ifBlank { msg.senderId.takeLast(2) },
                 size = 34.dp
             )
             Spacer(modifier = Modifier.width(8.dp))
@@ -428,29 +584,40 @@ fun MessageBubbleItem(
                             onLongClick = { showMenu = true }
                         )
                 ) {
-                    MimFileCard(
-                        fileName = msg.fileName ?: "未知文件",
-                        fileSize = msg.fileSize,
-                        isDownloaded = isDownloaded,
-                        isDownloading = isDownloading,
-                        downloadProgress = downloadProgress,
-                        onClick = {
-                            if (isDownloaded && !msg.localFilePath.isNullOrEmpty()) {
-                                openDownloadedFile(context, File(msg.localFilePath))
-                            } else if (!isDownloading) {
-                                isDownloading = true
-                                onDownload(
-                                    msg,
-                                    { progress -> downloadProgress = progress },
-                                    { _ -> isDownloading = false },
-                                    { err ->
-                                        isDownloading = false
-                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
+                    Column {
+                        if (!msg.quotedContent.isNullOrBlank()) {
+                            InBubbleQuoteView(
+                                quotedContent = msg.quotedContent,
+                                isSelf = isSelf,
+                                onClick = { onScrollToMessage(msg.quotedMsgId) }
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
                         }
-                    )
+
+                        MimFileCard(
+                            fileName = msg.fileName ?: "未知文件",
+                            fileSize = msg.fileSize,
+                            isDownloaded = isDownloaded,
+                            isDownloading = isDownloading,
+                            downloadProgress = downloadProgress,
+                            onClick = {
+                                if (isDownloaded && !msg.localFilePath.isNullOrEmpty()) {
+                                    openDownloadedFile(context, File(msg.localFilePath))
+                                } else if (!isDownloading) {
+                                    isDownloading = true
+                                    onDownload(
+                                        msg,
+                                        { progress -> downloadProgress = progress },
+                                        { _ -> isDownloading = false },
+                                        { err ->
+                                            isDownloading = false
+                                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            }
+                        )
+                    }
                 }
             } else {
                 Surface(
@@ -479,6 +646,16 @@ fun MessageBubbleItem(
                         )
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
+                        // In-Bubble Quoted Preview
+                        if (!msg.quotedContent.isNullOrBlank()) {
+                            InBubbleQuoteView(
+                                quotedContent = msg.quotedContent,
+                                isSelf = isSelf,
+                                onClick = { onScrollToMessage(msg.quotedMsgId) }
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+
                         when (msg.contentType) {
                             "text" -> {
                                 Text(
@@ -487,6 +664,24 @@ fun MessageBubbleItem(
                                         color = if (isSelf) MimTheme.colors.bubbleSelfText else MimTheme.colors.bubblePeerText,
                                         lineHeight = 20.sp
                                     )
+                                )
+                            }
+                            "voice" -> {
+                                val currentPlayingId by playerHelper.currentPlayingMsgId.collectAsState()
+                                val isPlaying by playerHelper.isPlaying.collectAsState()
+                                val progress by playerHelper.playbackProgress.collectAsState()
+                                val isThisPlaying = (currentPlayingId == msg.msgId && isPlaying)
+
+                                MimVoiceBubble(
+                                    isPlaying = isThisPlaying,
+                                    progress = if (currentPlayingId == msg.msgId) progress else 0f,
+                                    isSelf = isSelf,
+                                    onTogglePlay = {
+                                        val mediaSource = msg.localFilePath ?: msg.mediaUrl ?: ""
+                                        if (mediaSource.isNotBlank()) {
+                                            playerHelper.playOrToggle(msg.msgId, mediaSource)
+                                        }
+                                    }
                                 )
                             }
                             "image" -> {
@@ -547,6 +742,17 @@ fun MessageBubbleItem(
                     .background(MimTheme.colors.surfaceElevated)
                     .border(1.dp, MimTheme.colors.border, RoundedCornerShape(8.dp))
             ) {
+                // 1. Reply / Quote
+                DropdownMenuItem(
+                    text = { Text("引用回复", color = MimTheme.colors.textPrimary) },
+                    onClick = {
+                        showMenu = false
+                        onQuote(msg)
+                    },
+                    leadingIcon = { Icon(Icons.Default.Reply, contentDescription = null, tint = MimTheme.colors.accent) }
+                )
+
+                // 2. Copy Text
                 if (msg.contentType == "text" && msg.content.isNotBlank()) {
                     DropdownMenuItem(
                         text = { Text("复制内容", color = MimTheme.colors.textPrimary) },
@@ -559,6 +765,8 @@ fun MessageBubbleItem(
                         leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = MimTheme.colors.accent) }
                     )
                 }
+
+                // 3. Revoke (Self only)
                 if (isSelf) {
                     DropdownMenuItem(
                         text = { Text("撤回消息", color = Color(0xFFDC2626)) },

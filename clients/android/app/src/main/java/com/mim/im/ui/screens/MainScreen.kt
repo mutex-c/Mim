@@ -1,8 +1,10 @@
 package com.mim.im.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,8 +29,7 @@ import com.mim.im.network.WsManager
 import com.mim.im.network.WsStatus
 import com.mim.im.repository.AuthRepository
 import com.mim.im.repository.ChatRepository
-import com.mim.im.ui.components.MimAvatar
-import com.mim.im.ui.components.ServerConfigDialog
+import com.mim.im.ui.components.*
 import com.mim.im.ui.theme.MimTheme
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -46,6 +47,8 @@ fun MainScreen(
     val scope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Chats, 1: Contacts, 2: Settings
     var showServerConfig by remember { mutableStateOf(false) }
+    var showNewGroupDialog by remember { mutableStateOf(false) }
+    var selectedConvForAction by remember { mutableStateOf<ConversationEntity?>(null) }
 
     val conversations by chatRepo.getConversations().collectAsState(initial = emptyList())
     val wsStatus by wsManager.status.collectAsState()
@@ -64,6 +67,34 @@ fun MainScreen(
                 showServerConfig = false
                 wsManager.disconnect()
                 wsManager.connect()
+            }
+        )
+    }
+
+    if (showNewGroupDialog) {
+        NewGroupDialog(
+            authRepo = authRepo,
+            chatRepo = chatRepo,
+            onDismiss = { showNewGroupDialog = false },
+            onGroupCreated = { groupId, groupTitle ->
+                showNewGroupDialog = false
+                scope.launch {
+                    chatRepo.refreshConversations()
+                    onOpenChat("group_$groupId", groupTitle, groupId, true)
+                }
+            }
+        )
+    }
+
+    selectedConvForAction?.let { conv ->
+        ConversationActionSheet(
+            conv = conv,
+            chatRepo = chatRepo,
+            authRepo = authRepo,
+            onDismiss = { selectedConvForAction = null },
+            onActionCompleted = {
+                selectedConvForAction = null
+                scope.launch { chatRepo.refreshConversations() }
             }
         )
     }
@@ -140,6 +171,19 @@ fun MainScreen(
                         }
                     }
 
+                    // Action buttons
+                    IconButton(
+                        onClick = { showNewGroupDialog = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GroupAdd,
+                            contentDescription = "发起群聊",
+                            tint = MimTheme.colors.accent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     if (selectedTab == 0) {
                         IconButton(
                             onClick = { scope.launch { chatRepo.refreshConversations() } },
@@ -153,6 +197,7 @@ fun MainScreen(
                             )
                         }
                     }
+
                     IconButton(
                         onClick = { showServerConfig = true },
                         modifier = Modifier.size(36.dp)
@@ -266,10 +311,14 @@ fun MainScreen(
                         val targetId = conv.targetId.toLongOrNull() ?: 0L
                         val isGroup = conv.convType == "group"
                         onOpenChat(conv.id, conv.title, targetId, isGroup)
+                    },
+                    onConversationLongClick = { conv ->
+                        selectedConvForAction = conv
                     }
                 )
                 1 -> ContactsView(
                     authRepo = authRepo,
+                    myUserId = prefs.currentUser?.id?.toString() ?: "0",
                     onChatWithUser = { u ->
                         val myId = prefs.currentUser?.id?.toLongOrNull() ?: 0L
                         val targetId = u.id
@@ -290,7 +339,8 @@ fun MainScreen(
 @Composable
 fun ConversationListView(
     conversations: List<ConversationEntity>,
-    onConversationClick: (ConversationEntity) -> Unit
+    onConversationClick: (ConversationEntity) -> Unit,
+    onConversationLongClick: (ConversationEntity) -> Unit
 ) {
     if (conversations.isEmpty()) {
         Box(
@@ -337,7 +387,11 @@ fun ConversationListView(
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(conversations, key = { it.id }) { conv ->
-            ConversationRowItem(conversation = conv, onClick = { onConversationClick(conv) })
+            ConversationRowItem(
+                conversation = conv,
+                onClick = { onConversationClick(conv) },
+                onLongClick = { onConversationLongClick(conv) }
+            )
             HorizontalDivider(
                 color = MimTheme.colors.border.copy(alpha = 0.5f),
                 thickness = 0.5.dp,
@@ -347,19 +401,31 @@ fun ConversationListView(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConversationRowItem(
     conversation: ConversationEntity,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
+    val isPinned = conversation.isPinned
+    val isMuted = conversation.isMuted
+    val isGroup = conversation.convType == "group"
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .background(
+                if (isPinned) MimTheme.colors.surfaceElevated.copy(alpha = 0.55f)
+                else Color.Transparent
+            )
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val isGroup = conversation.convType == "group"
         MimAvatar(
             name = conversation.title,
             size = 46.dp,
@@ -374,24 +440,52 @@ fun ConversationRowItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = conversation.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = MimTheme.colors.textPrimary
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = formatTime(conversation.lastMessageTime),
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MimTheme.colors.textMuted,
-                        fontSize = 11.sp
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isPinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = "置顶",
+                            tint = MimTheme.colors.accent,
+                            modifier = Modifier
+                                .size(13.dp)
+                                .padding(end = 3.dp)
+                        )
+                    }
+                    Text(
+                        text = conversation.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MimTheme.colors.textPrimary
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isMuted) {
+                        Icon(
+                            imageVector = Icons.Default.NotificationsOff,
+                            contentDescription = "免打扰",
+                            tint = MimTheme.colors.textMuted,
+                            modifier = Modifier
+                                .size(13.dp)
+                                .padding(end = 4.dp)
+                        )
+                    }
+                    Text(
+                        text = formatTime(conversation.lastMessageTime),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MimTheme.colors.textMuted,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -418,7 +512,7 @@ fun ConversationRowItem(
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
-                            .background(MimTheme.colors.accent)
+                            .background(if (isMuted) MimTheme.colors.textMuted else MimTheme.colors.accent)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -448,18 +542,52 @@ fun formatLastMessage(raw: String): String {
 @Composable
 fun ContactsView(
     authRepo: AuthRepository,
+    myUserId: String,
     onChatWithUser: (UserDto) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var friends by remember { mutableStateOf<List<UserDto>>(emptyList()) }
     var searchKeyword by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<UserDto>>(emptyList()) }
+    var pendingRequestCount by remember { mutableIntStateOf(0) }
+
+    var showFriendRequestsSheet by remember { mutableStateOf(false) }
+    var userToAddFriend by remember { mutableStateOf<UserDto?>(null) }
+
+    fun refreshData() {
+        scope.launch {
+            authRepo.getFriends().onSuccess { friends = it }
+            if (friends.isEmpty()) {
+                authRepo.getDemoUsers().onSuccess { friends = it }
+            }
+            authRepo.getFriendRequests().onSuccess { reqs ->
+                pendingRequestCount = reqs.count { it.status == 1 }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
-        authRepo.getFriends().onSuccess { friends = it }
-        if (friends.isEmpty()) {
-            authRepo.getDemoUsers().onSuccess { friends = it }
-        }
+        refreshData()
+    }
+
+    if (showFriendRequestsSheet) {
+        FriendRequestsSheet(
+            authRepo = authRepo,
+            onDismiss = { showFriendRequestsSheet = false },
+            onRequestHandled = { refreshData() }
+        )
+    }
+
+    userToAddFriend?.let { targetUser ->
+        AddFriendDialog(
+            targetUser = targetUser,
+            authRepo = authRepo,
+            onDismiss = { userToAddFriend = null },
+            onSuccess = {
+                userToAddFriend = null
+                refreshData()
+            }
+        )
     }
 
     Column(
@@ -500,7 +628,77 @@ fun ContactsView(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // "新的朋友" Entry Row
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MimTheme.colors.surfaceElevated,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .border(1.dp, MimTheme.colors.border, RoundedCornerShape(12.dp))
+                .clickable { showFriendRequestsSheet = true }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MimTheme.colors.accent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = "新的朋友",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "新的朋友",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MimTheme.colors.textPrimary
+                        )
+                    )
+                    Text(
+                        text = "查看好友申请与处理",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MimTheme.colors.textMuted,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
+                if (pendingRequestCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color(0xFFEF4444))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = pendingRequestCount.toString(),
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         val displayList = if (searchKeyword.isNotBlank()) searchResults else friends
 
@@ -525,6 +723,9 @@ fun ContactsView(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(displayList) { user ->
+                val isFriend = friends.any { it.id == user.id }
+                val isSelf = user.id.toString() == myUserId
+
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MimTheme.colors.surfaceElevated,
@@ -565,17 +766,31 @@ fun ContactsView(
                             )
                         }
 
-                        Button(
-                            onClick = { onChatWithUser(user) },
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MimTheme.colors.accent,
-                                contentColor = Color.White
-                            ),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Text("发消息", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        if (!isSelf) {
+                            if (isFriend) {
+                                Button(
+                                    onClick = { onChatWithUser(user) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MimTheme.colors.accent,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("发消息", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { userToAddFriend = user },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MimTheme.colors.accent),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("+ 好友", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MimTheme.colors.accent)
+                                }
+                            }
                         }
                     }
                 }

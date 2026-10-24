@@ -37,7 +37,11 @@ data class MimColors(
     val bubblePeerText: Color,
     val inputBackground: Color,
     val isDark: Boolean
-)
+) {
+    val primary: Color get() = accent
+    val textSecondary: Color get() = textMuted
+    val cardBackground: Color get() = surfaceElevated
+}
 
 val PineLightColors = MimColors(
     background = Color(0xFFE7E6DE),

@@ -107,6 +107,7 @@ fun MimNavHost(app: MimApplication) {
                 targetId = targetId,
                 isGroup = isGroup,
                 chatRepo = app.chatRepository,
+                authRepo = app.authRepository,
                 onBack = { navController.popBackStack() }
             )
         }
