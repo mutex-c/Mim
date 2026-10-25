@@ -8,12 +8,13 @@
             v-for="tab in tabs"
             :key="tab.key"
             @click="activeTab = tab.key"
-            class="text-sm pb-2 font-medium transition-all relative"
+            class="text-sm pb-2 font-medium transition-all relative flex items-center gap-1.5"
             :class="activeTab === tab.key
               ? 'text-mim-accent font-semibold'
               : 'text-mim-light-muted dark:text-mim-dark-muted hover:text-mim-light-text dark:hover:text-mim-dark-text'"
           >
-            {{ tab.label }}
+            <component :is="tab.icon" v-if="tab.icon" class="w-3.5 h-3.5 inline-icon shrink-0" />
+            <span>{{ tab.label }}</span>
             <!-- Active Underline -->
             <span
               v-if="activeTab === tab.key"
@@ -368,6 +369,195 @@
           </div>
         </div>
 
+        <!-- TAB: AI 引擎 (Task 2: AI Model Configuration) -->
+        <div v-else-if="activeTab === 'ai'" class="space-y-5">
+          <!-- 1. Header Overview Card -->
+          <div class="p-4 rounded-2xl bg-black/[0.02] dark:bg-white/[0.03] border border-black/5 dark:border-white/5 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-lg bg-mim-accent-subtle flex items-center justify-center text-mim-accent">
+                  <Sparkles class="w-4 h-4 inline-icon" />
+                </div>
+                <div>
+                  <h4 class="text-xs font-semibold text-mim-light-text dark:text-mim-dark-text">AI 助手与大模型引擎</h4>
+                  <p class="text-[11px] text-mim-light-muted mt-0.5">配置标准 OpenAI 兼容协议服务，驱动 Mim 智能回复与会话摘要</p>
+                </div>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-mim-accent-subtle text-mim-accent font-mono font-medium">OpenAI Compatible</span>
+            </div>
+          </div>
+
+          <!-- 2. Provider Presets (服务提供商预设) -->
+          <div class="p-4 rounded-2xl bg-black/[0.02] dark:bg-white/[0.03] border border-black/5 dark:border-white/5 space-y-3">
+            <div>
+              <label class="text-xs font-semibold uppercase tracking-wider text-mim-light-muted block">
+                服务提供商预设
+              </label>
+              <p class="text-[11px] text-mim-light-muted mt-0.5">点击预设卡片自动套用标准 API 端点与推荐模型</p>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+              <button
+                v-for="preset in AI_PRESETS"
+                :key="preset.id"
+                type="button"
+                @click="selectPreset(preset)"
+                class="p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between gap-1 cursor-pointer group"
+                :class="aiForm.provider === preset.id
+                  ? 'border-mim-accent bg-mim-accent-subtle/30 ring-1 ring-mim-accent/40 shadow-xs'
+                  : 'border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5'"
+              >
+                <div class="flex items-center justify-between w-full">
+                  <span class="text-xs font-semibold text-mim-light-text dark:text-mim-dark-text group-hover:text-mim-accent transition-colors">
+                    {{ preset.name }}
+                  </span>
+                  <span v-if="preset.badge" class="text-[9px] px-1.5 py-0.2 rounded bg-mim-accent-subtle text-mim-accent font-medium">
+                    {{ preset.badge }}
+                  </span>
+                </div>
+                <span class="text-[10px] text-mim-light-muted line-clamp-1">
+                  {{ preset.desc }}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 3. Base URL & Credentials Card -->
+          <div class="p-4 rounded-2xl bg-black/[0.02] dark:bg-white/[0.03] border border-black/5 dark:border-white/5 space-y-4">
+            <!-- API Base URL -->
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <label class="text-xs font-semibold text-mim-light-text dark:text-mim-dark-text">
+                  API Base URL
+                </label>
+                <span class="text-[10px] text-mim-light-muted font-mono">兼容 /chat/completions</span>
+              </div>
+              <input
+                v-model="aiForm.base_url"
+                type="text"
+                placeholder="https://api.deepseek.com/v1"
+                class="mim-input w-full h-8 px-3 rounded-lg bg-black/5 dark:bg-white/5 text-xs text-mim-light-text dark:text-mim-dark-text border border-black/10 dark:border-white/10 focus:border-mim-accent focus:shadow-[inset_0_0_0_1.5px_var(--mim-accent)] font-mono"
+              />
+            </div>
+
+            <!-- API Key -->
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <label class="text-xs font-semibold text-mim-light-text dark:text-mim-dark-text">
+                  API Key 访问密钥
+                </label>
+                <span v-if="aiForm.provider === 'ollama'" class="text-[10px] text-mim-light-muted font-mono">本地 Ollama 可留空</span>
+              </div>
+              <div class="relative flex items-center">
+                <input
+                  v-model="aiForm.api_key"
+                  :type="showApiKey ? 'text' : 'password'"
+                  :placeholder="aiForm.provider === 'ollama' ? '本地运行无需 API Key (可选)' : 'sk-********************************'"
+                  class="mim-input w-full h-8 pl-3 pr-9 rounded-lg bg-black/5 dark:bg-white/5 text-xs text-mim-light-text dark:text-mim-dark-text border border-black/10 dark:border-white/10 focus:border-mim-accent focus:shadow-[inset_0_0_0_1.5px_var(--mim-accent)] font-mono"
+                />
+                <button
+                  type="button"
+                  @click="showApiKey = !showApiKey"
+                  class="absolute right-2 text-mim-light-muted hover:text-mim-light-text p-1 transition-colors cursor-pointer"
+                  :title="showApiKey ? '隐藏密钥' : '显示明文密钥'"
+                >
+                  <EyeOff v-if="showApiKey" class="w-3.5 h-3.5 inline-icon" />
+                  <Eye v-else class="w-3.5 h-3.5 inline-icon" />
+                </button>
+              </div>
+              <div class="mt-1.5 flex items-center gap-1.5 text-[11px] text-mim-light-muted">
+                <Shield class="w-3.5 h-3.5 text-emerald-500 shrink-0 inline-icon" />
+                <span>密钥存储在本地 SQLite 数据库中，后端中转调用，保障隐私并避免跨域。</span>
+              </div>
+            </div>
+
+            <!-- Model Name & Temperature Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-mim-light-text dark:text-mim-dark-text mb-1.5">
+                  模型名称 (Model Name)
+                </label>
+                <input
+                  v-model="aiForm.model"
+                  type="text"
+                  placeholder="deepseek-chat"
+                  class="mim-input w-full h-8 px-3 rounded-lg bg-black/5 dark:bg-white/5 text-xs text-mim-light-text dark:text-mim-dark-text border border-black/10 dark:border-white/10 focus:border-mim-accent focus:shadow-[inset_0_0_0_1.5px_var(--mim-accent)] font-mono"
+                />
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-xs font-semibold text-mim-light-text dark:text-mim-dark-text">
+                    采样温度 (Temperature)
+                  </label>
+                  <span class="text-xs font-mono font-medium text-mim-accent">{{ aiForm.temperature.toFixed(1) }}</span>
+                </div>
+                <input
+                  v-model.number="aiForm.temperature"
+                  type="range"
+                  min="0.0"
+                  max="1.5"
+                  step="0.1"
+                  class="w-full accent-mim-accent cursor-pointer"
+                />
+                <div class="flex justify-between text-[10px] text-mim-light-muted mt-0.5">
+                  <span>0.0 确定严谨</span>
+                  <span>0.7 平衡推荐</span>
+                  <span>1.5 创意发散</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. Test Result Feedback Card -->
+          <div
+            v-if="testStatus === 'success'"
+            class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium flex items-center justify-between"
+          >
+            <div class="flex items-center gap-2">
+              <CheckCircle2 class="w-4 h-4 inline-icon shrink-0" />
+              <span>连通正常 ({{ testLatencyMs }}ms) - 接口响应状态良好</span>
+            </div>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15">HTTP OK</span>
+          </div>
+
+          <div
+            v-else-if="testStatus === 'error'"
+            class="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-medium flex items-center justify-between"
+          >
+            <div class="flex items-center gap-2">
+              <AlertCircle class="w-4 h-4 inline-icon shrink-0" />
+              <span class="break-all">连接失败: {{ testErrorMsg }}</span>
+            </div>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/15 shrink-0">FAILED</span>
+          </div>
+
+          <!-- 5. Actions Footer within Tab -->
+          <div class="pt-2 flex items-center justify-between">
+            <button
+              type="button"
+              @click="handleTestConnection"
+              :disabled="isTesting"
+              class="px-4 h-8 rounded-lg border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-medium text-mim-light-text dark:text-mim-dark-text flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <Loader2 v-if="isTesting" class="w-3.5 h-3.5 inline-icon animate-spin text-mim-accent" />
+              <Zap v-else class="w-3.5 h-3.5 inline-icon text-amber-500" />
+              <span>{{ isTesting ? '正在测试连通性...' : '测试连通性' }}</span>
+            </button>
+
+            <button
+              type="button"
+              @click="handleSaveAIConfig"
+              :disabled="isSaving"
+              class="px-5 h-8 rounded-lg mim-btn-primary text-xs font-medium shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <Loader2 v-if="isSaving" class="w-3.5 h-3.5 inline-icon animate-spin" />
+              <Check v-else class="w-3.5 h-3.5 inline-icon" />
+              <span>{{ isSaving ? '保存中...' : '保存配置' }}</span>
+            </button>
+          </div>
+        </div>
+
         <!-- TAB 5: 系统设置 -->
         <div v-else-if="activeTab === 'system'" class="space-y-5">
           <!-- 1. Designer Aesthetic Palette Selector (Anti-AI Slop) -->
@@ -562,9 +752,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { X, Check, Sun, Moon, Monitor, Volume2, Search, Shield, LogOut, Palette } from 'lucide-vue-next';
+import {
+  X, Check, Sun, Moon, Monitor, Volume2, Search, Shield, LogOut, Palette,
+  Sparkles, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, Zap,
+} from 'lucide-vue-next';
 import CustomBgModal from './CustomBgModal.vue';
-import { useChatStore } from '../stores/chat';
+import { useChatStore, type AIConfigData } from '../stores/chat';
 import { useLangStore } from '../stores/lang';
 import { useThemeStore } from '../stores/theme';
 import { getAvatarColor, getStatusRingClass } from '../utils/avatar';
@@ -601,7 +794,7 @@ const handleLogout = () => {
   chatStore.logout();
 };
 
-const activeTab = ref<'profile' | 'basic' | 'security' | 'permission' | 'system'>('permission');
+const activeTab = ref<'profile' | 'basic' | 'security' | 'permission' | 'ai' | 'system'>('permission');
 const feedbackMsg = ref('');
 const showBgModal = ref(false);
 
@@ -610,6 +803,7 @@ const tabs = computed(() => [
   { key: 'basic' as const, label: langStore.t('settings.tabBasic') },
   { key: 'security' as const, label: langStore.t('settings.tabSecurity') },
   { key: 'permission' as const, label: langStore.t('settings.tabPermission') },
+  { key: 'ai' as const, label: langStore.currentLang === 'zh' ? 'AI 引擎' : 'AI Engine', icon: Sparkles },
   { key: 'system' as const, label: langStore.t('settings.tabSystem') },
 ]);
 
@@ -785,8 +979,139 @@ const testSound = () => {
   } catch (_) {}
 };
 
+// AI Engine Model Configuration (Task 2)
+interface ProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  defaultModel: string;
+  badge?: string;
+  desc: string;
+}
+
+const AI_PRESETS: ProviderPreset[] = [
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    defaultModel: 'deepseek-chat',
+    badge: '主流推荐',
+    desc: '深度求索，超高性价比通用对话与推理能力',
+  },
+  {
+    id: 'kimi',
+    name: 'Kimi (Moonshot)',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    defaultModel: 'moonshot-v1-8k',
+    desc: '月之暗面，长文本理解与中文语境出色',
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini',
+    badge: '标准协议',
+    desc: '业界通用基准，极高稳定性与多语言通用性',
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama 本地',
+    baseUrl: 'http://localhost:11434/v1',
+    defaultModel: 'qwen2.5:7b',
+    badge: '离线/内网',
+    desc: '本地私有化部署模型，零数据泄露风险',
+  },
+  {
+    id: 'custom',
+    name: '自定义 (Custom)',
+    baseUrl: '',
+    defaultModel: '',
+    desc: '自行输入第三方或企业自建 OpenAI 兼容网关',
+  },
+];
+
+const aiForm = ref<AIConfigData>({
+  provider: 'deepseek',
+  base_url: 'https://api.deepseek.com/v1',
+  api_key: '',
+  model: 'deepseek-chat',
+  temperature: 0.7,
+});
+
+const showApiKey = ref(false);
+const isTesting = ref(false);
+const isSaving = ref(false);
+const testStatus = ref<'success' | 'error' | null>(null);
+const testLatencyMs = ref(0);
+const testErrorMsg = ref('');
+
+const selectPreset = (preset: ProviderPreset) => {
+  aiForm.value.provider = preset.id;
+  if (preset.id !== 'custom') {
+    aiForm.value.base_url = preset.baseUrl;
+    aiForm.value.model = preset.defaultModel;
+  }
+  testStatus.value = null;
+  testErrorMsg.value = '';
+};
+
+const handleTestConnection = async () => {
+  if (!aiForm.value.base_url) {
+    testStatus.value = 'error';
+    testErrorMsg.value = '请先填写 API Base URL';
+    return;
+  }
+  if (!aiForm.value.api_key && aiForm.value.provider !== 'ollama') {
+    testStatus.value = 'error';
+    testErrorMsg.value = '请先填写 API Key (Ollama 除外)';
+    return;
+  }
+
+  isTesting.value = true;
+  testStatus.value = null;
+  testErrorMsg.value = '';
+
+  try {
+    const res = await chatStore.testAIConnection(aiForm.value);
+    if (res.success) {
+      testStatus.value = 'success';
+      testLatencyMs.value = res.latencyMs || 0;
+    } else {
+      testStatus.value = 'error';
+      testLatencyMs.value = res.latencyMs || 0;
+      testErrorMsg.value = res.error || '连接失败';
+    }
+  } catch (err: any) {
+    testStatus.value = 'error';
+    testErrorMsg.value = err.message || '未知错误';
+  } finally {
+    isTesting.value = false;
+  }
+};
+
+const handleSaveAIConfig = async () => {
+  if (!aiForm.value.base_url) {
+    showToast('Base URL 不能为空');
+    return;
+  }
+  isSaving.value = true;
+  try {
+    const res = await chatStore.saveAIConfig(aiForm.value);
+    if (res.success) {
+      showToast('AI 模型配置已保存生效');
+    } else {
+      showToast(res.error || '保存失败');
+    }
+  } catch (err: any) {
+    showToast(err.message || '网络异常');
+  } finally {
+    isSaving.value = false;
+  }
+};
+
 onMounted(async () => {
   await chatStore.fetchUserProfile();
+  await chatStore.fetchAIConfig();
   if (chatStore.userProfile) {
     profileForm.value.nickname = chatStore.userProfile.nickname;
     profileForm.value.avatar = chatStore.userProfile.avatar;
@@ -805,6 +1130,15 @@ onMounted(async () => {
     permForm.value.verifyMode = chatStore.userConfig.friend_verify_mode || 3;
     permForm.value.question = chatStore.userConfig.friend_verify_question || '';
     permForm.value.answer = chatStore.userConfig.friend_verify_answer || '';
+  }
+  if (chatStore.aiConfig) {
+    aiForm.value = {
+      provider: chatStore.aiConfig.provider || 'deepseek',
+      base_url: chatStore.aiConfig.base_url || 'https://api.deepseek.com/v1',
+      api_key: chatStore.aiConfig.api_key || '',
+      model: chatStore.aiConfig.model || 'deepseek-chat',
+      temperature: typeof chatStore.aiConfig.temperature === 'number' ? chatStore.aiConfig.temperature : 0.7,
+    };
   }
 });
 </script>

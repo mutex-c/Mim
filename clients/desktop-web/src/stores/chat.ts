@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import { router } from '../router';
 import { CmdType, encodeFrame, decodeFrame, FLAG_JSON } from '../protocol/frame';
 import { alertDialog } from './dialog';
-import { getWsUrl } from '../utils/api';
+import { getWsUrl, resolveApiUrl } from '../utils/api';
 
 export interface MessageItem {
   id: string;
@@ -71,6 +71,14 @@ export interface UserConfig {
   recall_time_limit: number;
 }
 
+export interface AIConfigData {
+  provider: string; // 'deepseek' | 'kimi' | 'openai' | 'ollama' | 'custom'
+  base_url: string;
+  api_key: string;
+  model: string;
+  temperature: number;
+}
+
 export interface DemoUser {
   user: {
     id: number;
@@ -126,6 +134,149 @@ export const useChatStore = defineStore('chat', () => {
         userConfig.value = json.data.config;
       }
     } catch (_) {}
+  };
+
+  const aiConfig = ref<AIConfigData>({
+    provider: 'deepseek',
+    base_url: 'https://api.deepseek.com/v1',
+    api_key: '',
+    model: 'deepseek-chat',
+    temperature: 0.7,
+  });
+
+  const fetchAIConfig = async (): Promise<void> => {
+    if (!currentUserId.value || !userToken.value) return;
+    try {
+      const url = resolveApiUrl(`/api/ai/config?user_id=${currentUserId.value}`);
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${userToken.value}` },
+      });
+      const json = await res.json();
+      if (json.code === 0 && json.data) {
+        aiConfig.value = {
+          provider: json.data.provider || 'deepseek',
+          base_url: json.data.base_url || 'https://api.deepseek.com/v1',
+          api_key: json.data.api_key || '',
+          model: json.data.model || 'deepseek-chat',
+          temperature: typeof json.data.temperature === 'number' ? json.data.temperature : 0.7,
+        };
+      }
+    } catch (err) {
+      console.warn('[AI] Failed to fetch AI config:', err);
+    }
+  };
+
+  const saveAIConfig = async (config: AIConfigData): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUserId.value || !userToken.value) {
+      return { success: false, error: 'User not logged in' };
+    }
+    try {
+      const url = resolveApiUrl(`/api/ai/config?user_id=${currentUserId.value}`);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userToken.value}`,
+        },
+        body: JSON.stringify(config),
+      });
+      const json = await res.json();
+      if (json.code === 0) {
+        aiConfig.value = { ...config };
+        return { success: true };
+      }
+      return { success: false, error: json.msg || 'Failed to save AI config' };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error' };
+    }
+  };
+
+  const testAIConnection = async (configToTest?: AIConfigData): Promise<{ success: boolean; latencyMs?: number; error?: string }> => {
+    const targetConfig = configToTest || aiConfig.value;
+    if (!targetConfig.base_url) {
+      return { success: false, error: 'Base URL 不能为空' };
+    }
+    if (!targetConfig.api_key && targetConfig.provider !== 'ollama') {
+      return { success: false, error: 'API Key 不能为空' };
+    }
+
+    const startTime = performance.now();
+
+    // 1. Direct endpoint test (works seamlessly in Tauri Desktop and local Ollama)
+    try {
+      let endpoint = targetConfig.base_url.replace(/\/+$/, '');
+      if (!endpoint.endsWith('/chat/completions')) {
+        endpoint = `${endpoint}/chat/completions`;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${targetConfig.api_key}`,
+        },
+        body: JSON.stringify({
+          model: targetConfig.model || 'deepseek-chat',
+          messages: [{ role: 'user', content: 'Ping' }],
+          max_tokens: 5,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const latencyMs = Math.round(performance.now() - startTime);
+
+      if (res.ok) {
+        return { success: true, latencyMs };
+      }
+      if (res.status === 401) {
+        return { success: false, latencyMs, error: '认证失败: API Key 无效 (401)' };
+      }
+      if (res.status === 404) {
+        return { success: false, latencyMs, error: '端点不存在或模型名称错误 (404)' };
+      }
+      const errText = await res.text().catch(() => '');
+      if (res.status === 400 && errText.toLowerCase().includes('model')) {
+        return { success: true, latencyMs };
+      }
+      return { success: false, latencyMs, error: `HTTP ${res.status}: ${errText.slice(0, 100)}` };
+    } catch (directErr: any) {
+      // 2. If direct fetch fails (e.g. browser CORS for public APIs), fallback to backend proxy test
+      if (currentUserId.value && userToken.value) {
+        try {
+          await saveAIConfig(targetConfig);
+          const convId = activeConvId.value || (conversations.value[0]?.id || '');
+          if (convId) {
+            const replyUrl = resolveApiUrl(`/api/ai/reply?user_id=${currentUserId.value}`);
+            const replyRes = await fetch(replyUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${userToken.value}`,
+              },
+              body: JSON.stringify({
+                conversation_id: convId,
+                count: 1,
+              }),
+            });
+            const latencyMs = Math.round(performance.now() - startTime);
+            if (replyRes.ok) {
+              const data = await replyRes.json();
+              if (data.code === 0) {
+                return { success: true, latencyMs };
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      const latencyMs = Math.round(performance.now() - startTime);
+      const msg = directErr.name === 'AbortError' ? '请求超时 (超过 8 秒)' : (directErr.message || '网络连接失败');
+      return { success: false, latencyMs, error: msg };
+    }
   };
 
   const activeTab = ref<string>('chats'); // 'chats', 'contacts', 'calls'
@@ -254,6 +405,13 @@ export const useChatStore = defineStore('chat', () => {
     messagesByConv.value = {};
     userProfile.value = null;
     userConfig.value = null;
+    aiConfig.value = {
+      provider: 'deepseek',
+      base_url: 'https://api.deepseek.com/v1',
+      api_key: '',
+      model: 'deepseek-chat',
+      temperature: 0.7,
+    };
     if (socket) {
       try {
         socket.onclose = null;
@@ -287,6 +445,7 @@ export const useChatStore = defineStore('chat', () => {
     connectWs();
     fetchConversations();
     fetchUserProfile();
+    fetchAIConfig();
   };
 
   // Login
@@ -319,6 +478,7 @@ export const useChatStore = defineStore('chat', () => {
           localStorage.removeItem('mim_logged_out');
         }
         await fetchUserProfile();
+        await fetchAIConfig();
         await fetchConversations();
         connectWs();
         return { success: true };
@@ -1603,6 +1763,7 @@ export const useChatStore = defineStore('chat', () => {
       connectWs();
       fetchConversations();
       fetchUserProfile();
+      fetchAIConfig();
     }
   });
 
@@ -1627,6 +1788,10 @@ export const useChatStore = defineStore('chat', () => {
     callDuration,
     userProfile,
     userConfig,
+    aiConfig,
+    fetchAIConfig,
+    saveAIConfig,
+    testAIConnection,
     login,
     register,
     logout,
