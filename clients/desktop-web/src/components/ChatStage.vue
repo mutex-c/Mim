@@ -735,7 +735,7 @@
                     : 'bg-cyan-950/40 text-cyan-200 border border-cyan-400/40 hover:border-cyan-300 hover:bg-cyan-900/50'"
                   title="科洛列夫茨基剧团 · 沃雅妮莎专属微表情"
                 >
-                  <img :src="iconLily" alt="" class="w-3.5 h-3.5 object-contain inline-block shrink-0" />
+                  <img :src="iconBtnSticker" alt="" class="w-4 h-4 object-contain inline-block shrink-0" @error="(e: any) => e.target.style.display = 'none'" />
                   <span class="font-medium text-[11px]">沃雅贴纸</span>
                 </button>
                 <VodyanitsaStickerPicker
@@ -754,7 +754,7 @@
                 class="px-3 h-8 rounded-lg flex items-center gap-1.5 text-xs transition-all disabled:opacity-40 cursor-pointer bg-gradient-to-r from-amber-600/40 via-amber-500/30 to-amber-700/40 text-amber-200 font-bold border border-amber-400/50 hover:border-amber-300 hover:shadow-[0_0_12px_rgba(234,179,8,0.4)]"
                 title="「唤春角笛」- 沃雅妮莎角色祈愿"
               >
-                <img :src="iconConch" alt="" class="w-3.5 h-3.5 object-contain inline-block shrink-0" />
+                <img :src="iconBtnHorn" alt="" class="w-4 h-4 object-contain inline-block shrink-0" @error="(e: any) => e.target.style.display = 'none'" />
                 <span class="font-bold text-[11px] tracking-wider">唤春角笛</span>
               </button>
 
@@ -1454,6 +1454,8 @@ import iconLily from '../assets/vodyanitsa/dock/nav_contacts_lily.png';
 import iconConch from '../assets/vodyanitsa/dock/nav_calls_conch.png';
 import iconCrest from '../assets/vodyanitsa/images/header_vodyanitsa_crest.png';
 import iconPalette from '../assets/vodyanitsa/images/icon_stage_palette.png';
+import iconBtnSticker from '../assets/vodyanitsa/images/icon_btn_sticker.png';
+import iconBtnHorn from '../assets/vodyanitsa/images/icon_btn_horn.png';
 import { useCustomStickersStore, type CustomSticker } from '../stores/customStickers';
 import { playGenshinClick, playPrimogemSparkle } from '../utils/genshinAudio';
 import { resolveApiUrl } from '../utils/api';
