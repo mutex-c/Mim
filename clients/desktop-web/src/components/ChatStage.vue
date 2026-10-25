@@ -2704,6 +2704,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (summaryAbortController) {
+    summaryAbortController.abort();
+    summaryAbortController = null;
+  }
   window.removeEventListener('click', closePopupOnGlobalClick);
   window.removeEventListener('keydown', handleEscKey);
 });

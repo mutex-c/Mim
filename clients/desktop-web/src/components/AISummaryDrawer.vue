@@ -208,7 +208,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue';
+import { ref, computed, reactive, watch, onBeforeUnmount } from 'vue';
 import {
   Sparkles,
   FileText,
@@ -252,6 +252,13 @@ const emit = defineEmits<{
 const isCopied = ref(false);
 let copyTimer: number | null = null;
 
+onBeforeUnmount(() => {
+  if (copyTimer) {
+    clearTimeout(copyTimer);
+    copyTimer = null;
+  }
+});
+
 const handleCopy = async () => {
   if (!props.summary) return;
   try {
@@ -274,6 +281,14 @@ const handleSend = () => {
 
 // Interactive task item state
 const taskCheckedState = reactive<Record<string, boolean>>({});
+
+// Reset task check states when summary updates
+watch(
+  () => props.summary,
+  () => {
+    Object.keys(taskCheckedState).forEach((k) => delete taskCheckedState[k]);
+  }
+);
 
 const isTaskChecked = (item: SummaryItem): boolean => {
   if (taskCheckedState[item.id] !== undefined) {
@@ -307,7 +322,7 @@ export interface SummarySection {
 // Helper: Strip emojis for strictly emoji-free UI text
 const stripEmojis = (str: string): string => {
   return str
-    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FAFF}]/gu, '')
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FAFF}\u200D\uFE0E\uFE0F]/gu, '')
     .trim();
 };
 
