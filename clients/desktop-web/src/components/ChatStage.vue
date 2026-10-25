@@ -689,11 +689,46 @@
             <span class="corner-snowflake br">✦</span>
           </template>
 
+          <!-- AI Smart Reply Bar (above textarea) -->
+          <AISmartReplyBar
+            v-if="showSmartReply"
+            :suggestions="replySuggestions"
+            :loading="isReplying"
+            :visible="showSmartReply"
+            @select="onSmartReplySelect"
+            @send="onSmartReplySend"
+            @regenerate="fetchSmartReplies"
+            @close="showSmartReply = false"
+          />
+
+          <!-- Input Toolbar (above textarea) -->
+          <div class="flex items-center justify-between pb-1 border-b border-black/[0.04] dark:border-white/[0.04]">
+            <div class="flex items-center gap-1.5">
+              <button
+                @click="toggleSmartReply"
+                :disabled="isMutedInGroup"
+                type="button"
+                class="px-2.5 h-7 rounded-lg flex items-center gap-1.5 text-xs transition-all cursor-pointer font-medium disabled:opacity-40"
+                :class="showSmartReply
+                  ? 'bg-mim-accent text-white shadow-2xs'
+                  : (themeStore.currentPalette === 'vodyanitsa'
+                    ? 'text-cyan-300 hover:bg-cyan-500/20'
+                    : 'text-mim-accent hover:bg-mim-accent-subtle')"
+                title="AI 智能帮回"
+              >
+                <Sparkles class="w-3.5 h-3.5 inline-icon" />
+                <span>AI 帮回</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Message Textarea -->
           <textarea
+            ref="textareaRef"
             v-model="inputContent"
             :disabled="isMutedInGroup"
             @keydown.enter.exact.prevent="handleSend"
+            @keydown.esc="showSmartReply = false"
             @paste="handlePaste"
             rows="2"
             :placeholder="isMutedInGroup ? '当前禁言中，无法发送消息' : (themeStore.currentPalette === 'vodyanitsa' ? '输入消息... (Enter 发送, Shift+Enter 换行)' : langStore.t('chat.inputPlaceholder'))"
@@ -1476,6 +1511,7 @@ import GenshinStickerPicker from './GenshinStickerPicker.vue';
 import GenshinWishModal from './GenshinWishModal.vue';
 import VodyanitsaStickerPicker from './VodyanitsaStickerPicker.vue';
 import CustomBgModal from './CustomBgModal.vue';
+import AISmartReplyBar, { type SmartReplySuggestion } from './AISmartReplyBar.vue';
 import { useThemeStore } from '../stores/theme';
 import type { GenshinSticker } from '../assets/genshin/stickers';
 import { CHIBI_STICKERS, type ChibiSticker } from '../assets/genshin/chibiStickers';
@@ -1647,6 +1683,11 @@ const getSpeakerName = (msg: { isMe?: boolean; senderName?: string }): string =>
 };
 
 const inputContent = ref('');
+const inputText = inputContent;
+const textareaRef = ref<HTMLTextAreaElement | null>(null);
+const showSmartReply = ref(false);
+const isReplying = ref(false);
+const replySuggestions = ref<SmartReplySuggestion[]>([]);
 const activeQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
 const displayedQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
 const copiedMsgId = ref<string | null>(null);
@@ -2276,6 +2317,54 @@ const triggerAISummary = async () => {
   }
 };
 
+// AI Smart Reply Methods
+const fetchSmartReplies = async () => {
+  if (!chatStore.activeConvId || isReplying.value) return;
+  isReplying.value = true;
+  try {
+    const res = await fetch(`/api/ai/reply?user_id=${chatStore.currentUserId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${chatStore.userToken}`,
+      },
+      body: JSON.stringify({
+        conversation_id: chatStore.activeConvId,
+      }),
+    });
+    const json = await res.json();
+    if (json.code === 0 && json.data && json.data.suggestions) {
+      replySuggestions.value = json.data.suggestions;
+    }
+  } catch (err) {
+    console.error('Failed to fetch smart replies:', err);
+  } finally {
+    isReplying.value = false;
+  }
+};
+
+const toggleSmartReply = async () => {
+  if (showSmartReply.value) {
+    showSmartReply.value = false;
+    return;
+  }
+  showSmartReply.value = true;
+  await fetchSmartReplies();
+};
+
+const onSmartReplySelect = (text: string) => {
+  inputText.value = text;
+  nextTick(() => {
+    textareaRef.value?.focus();
+  });
+};
+
+const onSmartReplySend = (text: string) => {
+  inputText.value = text;
+  handleSend();
+  showSmartReply.value = false;
+};
+
 // WebRTC Calls
 const startCall = (type: 'audio' | 'video') => {
   chatStore.initiateWebRTCCall(type);
@@ -2500,6 +2589,8 @@ const closePopupOnGlobalClick = () => {
 watch(
   () => chatStore.activeConvId,
   () => {
+    showSmartReply.value = false;
+    replySuggestions.value = [];
     if (isGroup.value) {
       refreshGroupData();
     }
@@ -2508,8 +2599,15 @@ watch(
   { immediate: true }
 );
 
+const handleSmartReplyEsc = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && showSmartReply.value) {
+    showSmartReply.value = false;
+  }
+};
+
 onMounted(() => {
   window.addEventListener('click', closePopupOnGlobalClick);
+  window.addEventListener('keydown', handleSmartReplyEsc);
   if (isGroup.value) {
     refreshGroupData();
   }
@@ -2517,5 +2615,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('click', closePopupOnGlobalClick);
+  window.removeEventListener('keydown', handleSmartReplyEsc);
 });
 </script>
