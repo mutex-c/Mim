@@ -16,7 +16,7 @@
           class="text-sm font-semibold text-mim-light-text dark:text-mim-dark-text truncate leading-snug select-text"
           :title="message.fileName || '未知文件'"
         >
-          {{ message.fileName || '未知文件' }}
+          {{ formatMiddleEllipsis(message.fileName || '未知文件', 22) }}
         </div>
 
         <!-- Subtitle: Size + Download Status -->
@@ -164,6 +164,21 @@
     </button>
   </div>
 </template>
+
+<script lang="ts">
+export const formatMiddleEllipsis = (name: string, maxLen = 22): string => {
+  if (!name || name.length <= maxLen) return name;
+  const lastDot = name.lastIndexOf('.');
+  const ext = lastDot !== -1 ? name.slice(lastDot) : '';
+  const base = lastDot !== -1 ? name.slice(0, lastDot) : name;
+  const keepEnd = Math.max(ext.length + 3, 5);
+  const keepStart = maxLen - keepEnd - 3;
+  if (keepStart <= 2) {
+    return base.slice(0, 8) + '...' + ext;
+  }
+  return base.slice(0, keepStart) + '...' + base.slice(-2) + ext;
+};
+</script>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';

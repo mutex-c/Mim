@@ -4,6 +4,12 @@
     class="h-full flex flex-col bg-mim-light-list dark:bg-mim-dark-list select-none shrink-0 relative border-r border-black/[0.04] dark:border-white/[0.04]"
     :class="{ 'transition-none': isDragging, 'transition-[width] duration-75 ease-out': !isDragging }"
   >
+    <!-- Full-screen drag overlay preventing iframe/selection interception (规范 5) -->
+    <div
+      v-if="isDragging"
+      class="fixed inset-0 z-50 cursor-col-resize select-none pointer-events-auto"
+    ></div>
+
     <!-- Header with Search -->
     <div class="p-4 pb-3 flex flex-col gap-3">
       <div class="flex items-center justify-between">
@@ -129,13 +135,13 @@
     <!-- New Chat Modal -->
     <NewChatModal v-if="showNewChatModal" @close="showNewChatModal = false" />
 
-    <!-- Draggable Resize Handle on the Right Border -->
+    <!-- Draggable Resize Handle on the Right Border (规范 5) -->
     <div
       class="absolute -right-1 top-0 bottom-0 w-2.5 cursor-col-resize z-20 group flex items-center justify-center hover:bg-mim-accent/10 transition-colors select-none"
       :class="{ 'bg-mim-accent/20': isDragging }"
       @mousedown.prevent="startResize"
-      @dblclick="resetWidth"
-      title="按住左右拖拽调节会话栏宽度，双击恢复默认宽度"
+      @dblclick="resetToHalf"
+      title="按住左右拖拽调节会话栏宽度，双击恢复半屏或默认宽度"
     >
       <div
         class="w-[2px] h-full transition-colors"
@@ -271,38 +277,68 @@ const onConvContextMenu = (e: MouseEvent, conv: any) => {
   contextMenuStore.show(e, items);
 };
 
+let initialWidth = 320;
+let startX = 0;
+let startWidth = 320;
+
+const onMouseMove = (moveEvent: MouseEvent) => {
+  const delta = moveEvent.clientX - startX;
+  let newWidth = startWidth + delta;
+  const maxRatio = 0.82;
+  const maxWidth = window.innerWidth * maxRatio;
+  if (newWidth > maxWidth) {
+    newWidth = maxWidth;
+  }
+  if (newWidth / window.innerWidth > maxRatio) {
+    newWidth = window.innerWidth * maxRatio;
+  }
+  chatStore.setSidebarWidth(newWidth);
+};
+
+const onKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') {
+    chatStore.setSidebarWidth(initialWidth);
+    stopResize();
+  }
+};
+
+const stopResize = () => {
+  if (!isDragging.value) return;
+  isDragging.value = false;
+  window.removeEventListener('mousemove', onMouseMove);
+  window.removeEventListener('mouseup', onMouseUp);
+  window.removeEventListener('keydown', onKeyDown);
+  document.body.style.removeProperty('cursor');
+  document.body.style.removeProperty('user-select');
+};
+
+const onMouseUp = () => {
+  stopResize();
+};
+
 const startResize = (e: MouseEvent) => {
   isDragging.value = true;
-  const startX = e.clientX;
-  const startWidth = chatStore.sidebarWidth;
-
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    const delta = moveEvent.clientX - startX;
-    chatStore.setSidebarWidth(startWidth + delta);
-  };
-
-  const onMouseUp = () => {
-    isDragging.value = false;
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
-    document.body.style.removeProperty('cursor');
-    document.body.style.removeProperty('user-select');
-  };
+  startX = e.clientX;
+  startWidth = chatStore.sidebarWidth;
+  initialWidth = chatStore.sidebarWidth;
 
   document.body.style.cursor = 'col-resize';
   document.body.style.userSelect = 'none';
 
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('keydown', onKeyDown);
 };
 
-const resetWidth = () => {
-  chatStore.setSidebarWidth(320);
+const resetToHalf = () => {
+  const half = Math.round(window.innerWidth / 2);
+  chatStore.setSidebarWidth(half > 220 && half <= 520 ? half : 320);
 };
+
+const resetWidth = resetToHalf;
 
 onUnmounted(() => {
-  document.body.style.removeProperty('cursor');
-  document.body.style.removeProperty('user-select');
+  stopResize();
 });
 
 const formatLastMessage = (msg: string | undefined) => {

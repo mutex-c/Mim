@@ -145,14 +145,15 @@
         </div>
       </header>
 
-      <!-- Message Stream -->
-      <div ref="scrollContainer" class="flex-1 overflow-y-auto px-6 py-4 space-y-4 relative z-1">
-        <div
-          v-for="msg in chatStore.activeMessages"
-          :key="msg.id"
-          class="flex flex-col group relative"
-          :class="msg.isRevoked || msg.msgType === 'revoke' ? 'items-center my-2' : (msg.isMe ? 'items-end' : 'items-start')"
-        >
+      <!-- Message Stream Area with Floating Jump Pill (规范 2) -->
+      <div class="flex-1 min-h-0 relative z-1">
+        <div ref="scrollContainer" @scroll="onMessagesScroll" class="w-full h-full overflow-y-auto px-6 py-4 space-y-4">
+          <div
+            v-for="msg in chatStore.activeMessages"
+            :key="msg.id"
+            class="flex flex-col group relative"
+            :class="msg.isRevoked || msg.msgType === 'revoke' ? 'items-center my-2' : (msg.isMe ? 'items-end' : 'items-start')"
+          >
           <!-- Revoked Notice Pill (Centered, minimal, sleek WeChat/Slack-style capsule) -->
           <div
             v-if="msg.isRevoked || msg.msgType === 'revoke'"
@@ -659,6 +660,19 @@
         </div>
       </div>
 
+      <!-- Floating Jump to Bottom Pill (规范 2) -->
+      <Transition name="fade">
+        <button
+          v-if="showJumpToBottom"
+          @click="scrollToBottom(true)"
+          class="absolute bottom-4 right-6 z-30 px-3.5 py-1.5 rounded-full bg-white/90 dark:bg-[#1a2332]/90 backdrop-blur-md shadow-lg border border-black/[0.08] dark:border-white/[0.1] text-xs font-medium text-mim-light-text dark:text-mim-dark-text hover:text-mim-accent transition-all flex items-center gap-1.5 hover:scale-105 active:scale-95 cursor-pointer"
+        >
+          <ArrowDown class="w-3.5 h-3.5" />
+          <span>跳至最新</span>
+        </button>
+      </Transition>
+    </div>
+
       <!-- Active Quote Bar -->
       <div class="mim-accordion px-6" :class="{ open: !!activeQuote }">
         <div class="mim-accordion-inner">
@@ -688,7 +702,7 @@
       <!-- Bottom Input Bar -->
       <div class="p-4 pt-2 relative z-10">
         <div
-          class="rounded-2xl shadow-card p-3 flex flex-col gap-2 relative transition-all"
+          class="rounded-[20px] shadow-card p-3 flex flex-col gap-2 relative transition-all border border-black/[0.08] dark:border-white/[0.08] focus-within:border-transparent focus-within:shadow-[inset_0_0_0_1.5px_var(--mim-accent)]"
           :class="themeStore.currentPalette === 'vodyanitsa'
             ? 'vodyanitsa-input-deck !m-0 !p-3.5'
             : 'bg-mim-light-card dark:bg-mim-dark-card'"
@@ -720,7 +734,7 @@
                 @click="toggleSmartReply"
                 :disabled="isMutedInGroup"
                 type="button"
-                class="px-2.5 h-7 rounded-lg flex items-center gap-1.5 text-xs transition-all cursor-pointer font-medium disabled:opacity-40"
+                class="px-2.5 h-7 rounded-lg flex items-center gap-1.5 text-xs transition-all cursor-pointer font-medium disabled:opacity-40 border-0"
                 :class="showSmartReply
                   ? 'bg-mim-accent text-white shadow-2xs'
                   : (themeStore.currentPalette === 'vodyanitsa'
@@ -739,12 +753,14 @@
             ref="textareaRef"
             v-model="inputContent"
             :disabled="isMutedInGroup"
-            @keydown.enter.exact.prevent="handleSend"
+            @compositionstart="onCompositionStart"
+            @compositionend="onCompositionEnd"
+            @keydown="onInputKeyDown"
             @keydown.esc="showSmartReply = false"
             @paste="handlePaste"
             rows="2"
             :placeholder="isMutedInGroup ? '当前禁言中，无法发送消息' : (themeStore.currentPalette === 'vodyanitsa' ? '输入消息... (Enter 发送, Shift+Enter 换行)' : langStore.t('chat.inputPlaceholder'))"
-            class="mim-input w-full p-2 bg-transparent text-sm resize-none border-none outline-none pretty-wrap disabled:cursor-not-allowed disabled:opacity-50"
+            class="w-full p-2 bg-transparent text-sm resize-none border-none outline-none shadow-none focus:outline-none focus:ring-0 focus:shadow-none pretty-wrap disabled:cursor-not-allowed disabled:opacity-50"
             :class="themeStore.currentPalette === 'vodyanitsa'
               ? 'text-white placeholder-cyan-200/60'
               : 'text-mim-light-text dark:text-mim-dark-text placeholder-mim-light-muted dark:placeholder-mim-dark-muted'"
@@ -757,7 +773,7 @@
               <button
                 @click="triggerImageInput"
                 :disabled="isMutedInGroup"
-                class="w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-40 transition-colors"
+                class="w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-40 transition-colors border-0"
                 :class="themeStore.currentPalette === 'vodyanitsa'
                   ? 'text-cyan-300 hover:bg-cyan-500/20'
                   : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
@@ -768,7 +784,7 @@
               <button
                 @click="triggerFileInput"
                 :disabled="isMutedInGroup"
-                class="w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-40 transition-colors"
+                class="w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-40 transition-colors border-0"
                 :class="themeStore.currentPalette === 'vodyanitsa'
                   ? 'text-cyan-300 hover:bg-cyan-500/20'
                   : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
@@ -779,7 +795,7 @@
               <button
                 @click="toggleVoiceRecording"
                 :disabled="isMutedInGroup"
-                class="px-2 h-8 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-40 cursor-pointer"
+                class="px-2 h-8 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-40 cursor-pointer border-0"
                 :class="isRecording
                   ? 'bg-red-500/20 text-red-500 animate-pulse font-medium'
                   : (themeStore.currentPalette === 'vodyanitsa' ? 'text-cyan-300 hover:bg-cyan-500/20' : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text')"
@@ -791,7 +807,7 @@
               <button
                 @click="triggerAISummary"
                 :disabled="isMutedInGroup"
-                class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-colors font-medium cursor-pointer disabled:opacity-50"
+                class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-colors font-medium cursor-pointer disabled:opacity-50 border-0"
                 :class="showSummaryDrawer
                   ? 'bg-mim-accent text-white'
                   : (themeStore.currentPalette === 'vodyanitsa'
@@ -843,9 +859,9 @@
                 <button
                   @click="showGenshinStickers = !showGenshinStickers; showVodyanitsaStickers = false; if (themeStore.currentPalette === 'genshin') playGenshinClick();"
                   :disabled="isMutedInGroup"
-                  class="px-2 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer"
+                  class="px-2 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer border-0"
                   :class="showGenshinStickers
-                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30'
+                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold'
                     : 'text-amber-600/80 dark:text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-300'"
                   title="提瓦特派蒙画作与经典台词"
                 >
@@ -865,7 +881,7 @@
                 v-if="themeStore.currentPalette !== 'vodyanitsa'"
                 @click="showWishModal = true; playPrimogemSparkle()"
                 :disabled="isMutedInGroup"
-                class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-purple-500/15 text-amber-600 dark:text-amber-300 font-bold border border-amber-500/30 hover:border-amber-400 hover:shadow-xs"
+                class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-purple-500/15 text-amber-600 dark:text-amber-300 font-bold hover:shadow-xs border-0"
                 title="提瓦特祈愿抽卡系统"
               >
                 <Sparkles class="w-3.5 h-3.5 inline-icon text-amber-400" />
@@ -877,10 +893,10 @@
             <button
               @click="handleSend"
               :disabled="!inputContent.trim() || isMutedInGroup"
-              class="px-4 h-8 rounded-lg disabled:opacity-40 text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:cursor-not-allowed transition-all"
+              class="px-4 h-8 rounded-lg disabled:opacity-40 text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:cursor-not-allowed transition-all border-0"
               :class="themeStore.currentPalette === 'vodyanitsa'
                 ? 'bg-gradient-to-r from-sky-500 to-cyan-400 hover:from-sky-400 hover:to-cyan-300 text-white shadow-[0_0_12px_rgba(56,189,248,0.5)] border border-cyan-200/50'
-                : 'mim-btn-primary'"
+                : 'mim-btn-primary !border-0'"
             >
               <span>{{ langStore.t('chat.send') }}</span>
               <Send class="w-3 h-3 inline-icon" />
@@ -1479,9 +1495,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted, toRaw } from 'vue';
+import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted, onBeforeUnmount, toRaw } from 'vue';
 import { useRouter } from 'vue-router';
 import {
+  ArrowDown,
   Phone,
   Video,
   MoreHorizontal,
@@ -1572,7 +1589,7 @@ const handleSelectGenshinSticker = (sticker: GenshinSticker) => {
   activeQuote.value = null;
   displayedQuote.value = null;
   showGenshinStickers.value = false;
-  scrollToBottom();
+  scrollToBottom(true);
 };
 
 const handleSelectChibi = (chibi: ChibiSticker) => {
@@ -1580,7 +1597,7 @@ const handleSelectChibi = (chibi: ChibiSticker) => {
   activeQuote.value = null;
   displayedQuote.value = null;
   showGenshinStickers.value = false;
-  scrollToBottom();
+  scrollToBottom(true);
 };
 
 const handleSelectVodyanitsaSticker = (stickerId: string) => {
@@ -1588,7 +1605,7 @@ const handleSelectVodyanitsaSticker = (stickerId: string) => {
   activeQuote.value = null;
   displayedQuote.value = null;
   showVodyanitsaStickers.value = false;
-  scrollToBottom();
+  scrollToBottom(true);
 };
 
 const handleSelectCustomSticker = (sticker: CustomSticker) => {
@@ -1597,7 +1614,7 @@ const handleSelectCustomSticker = (sticker: CustomSticker) => {
   activeQuote.value = null;
   displayedQuote.value = null;
   showVodyanitsaStickers.value = false;
-  scrollToBottom();
+  scrollToBottom(true);
 };
 
 const isCustomSticker = (content: string) => {
@@ -1627,7 +1644,7 @@ const parseVodyanitsaStickerId = (content: string) => {
 
 const handleShareWishResult = (payload: { bannerName: string; pulls: any[]; summaryText: string }) => {
   chatStore.sendMessage(`[GENSHIN_WISH]:${JSON.stringify(payload)}`);
-  scrollToBottom();
+  scrollToBottom(true);
 };
 
 const isPaimonChibi = (content: string) => {
@@ -1720,6 +1737,50 @@ const activeQuote = ref<{ msgId: string; userName: string; content: string } | n
 const displayedQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
 const copiedMsgId = ref<string | null>(null);
 const scrollContainer = ref<HTMLDivElement | null>(null);
+
+// 规范 1：中文输入法选字回车防误触 (IME Composition Enter Guard)
+let isComposing = false;
+let compositionCooldown = false;
+let cooldownTimer: any = null;
+
+const onCompositionStart = () => {
+  isComposing = true;
+  compositionCooldown = true;
+  if (cooldownTimer) clearTimeout(cooldownTimer);
+};
+
+const onCompositionEnd = () => {
+  isComposing = false;
+  if (cooldownTimer) clearTimeout(cooldownTimer);
+  cooldownTimer = setTimeout(() => {
+    compositionCooldown = false;
+  }, 500); // 选字结束后 500ms 内的回车彻底拦截
+};
+
+const onInputKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (isComposing || compositionCooldown || e.keyCode === 229) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    handleSend();
+  }
+};
+
+// 规范 2：智能滚动吸底与「跳至最新」悬浮药丸 (Smart Scroll Bottom Following & Jump Pill)
+const autoFollowBottom = ref(true);
+const showJumpToBottom = ref(false);
+
+const onMessagesScroll = (e: Event) => {
+  const el = e.target as HTMLElement;
+  if (!el) return;
+  const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+  // 离底部 40px 以内才自动跟随新消息；用户一滚动就停止跟随
+  autoFollowBottom.value = dist <= 40;
+  // 离底部超过 120px 时显示「跳至最新」按钮
+  showJumpToBottom.value = dist > 120;
+};
 
 const imageInputRef = ref<HTMLInputElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -1957,13 +2018,23 @@ const handleSend = () => {
   inputContent.value = '';
   clearQuote();
 
-  scrollToBottom();
+  scrollToBottom(true);
 };
 
-const scrollToBottom = () => {
+const scrollToBottom = (force = false) => {
+  if (!force && !autoFollowBottom.value) return;
   nextTick(() => {
     if (scrollContainer.value) {
-      scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
+      if (force) {
+        scrollContainer.value.scrollTo({
+          top: scrollContainer.value.scrollHeight,
+          behavior: 'smooth',
+        });
+        autoFollowBottom.value = true;
+        showJumpToBottom.value = false;
+      } else {
+        scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
+      }
     }
   });
 };
@@ -2166,7 +2237,7 @@ const uploadAndSendFile = async (file: File, type: 'image' | 'file') => {
         fileSize: formattedSize,
         filePath: localPath,
       });
-      scrollToBottom();
+      scrollToBottom(true);
     } else {
       console.error('File upload server error:', json);
       alertDialog({
@@ -2249,7 +2320,7 @@ const toggleVoiceRecording = async () => {
               duration: durationSec,
               fileName: file.name,
             });
-            scrollToBottom();
+            scrollToBottom(true);
           }
         } catch (err) {
           console.error('Upload voice failed:', err);
@@ -2380,7 +2451,7 @@ const onSendSummaryToChat = (summaryText: string) => {
   if (!summaryText.trim()) return;
   chatStore.sendMessage(summaryText);
   showSummaryDrawer.value = false;
-  scrollToBottom();
+  scrollToBottom(true);
 };
 
 // AI Smart Reply Methods
@@ -2678,9 +2749,18 @@ watch(
     if (isGroup.value) {
       refreshGroupData();
     }
-    scrollToBottom();
+    autoFollowBottom.value = true;
+    showJumpToBottom.value = false;
+    scrollToBottom(true);
   },
   { immediate: true }
+);
+
+watch(
+  () => chatStore.activeMessages.length,
+  () => {
+    scrollToBottom(false);
+  }
 );
 
 const handleEscKey = (e: KeyboardEvent) => {
@@ -2703,12 +2783,36 @@ onMounted(() => {
   }
 });
 
+onBeforeUnmount(() => {
+  if (cooldownTimer) {
+    clearTimeout(cooldownTimer);
+    cooldownTimer = null;
+  }
+});
+
 onUnmounted(() => {
   if (summaryAbortController) {
     summaryAbortController.abort();
     summaryAbortController = null;
   }
+  if (cooldownTimer) {
+    clearTimeout(cooldownTimer);
+    cooldownTimer = null;
+  }
   window.removeEventListener('click', closePopupOnGlobalClick);
   window.removeEventListener('keydown', handleEscKey);
 });
 </script>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+</style>
