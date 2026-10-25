@@ -1458,6 +1458,12 @@ func (s *Server) handleAIReply(w http.ResponseWriter, r *http.Request, userID ui
 		return
 	}
 
+	var conv models.Conversation
+	if err := s.db.Where("user_id = ? AND conversation_id = ?", userID, body.ConversationID).First(&conv).Error; err != nil {
+		s.jsonError(w, http.StatusForbidden, "Access denied: you are not a participant of this conversation")
+		return
+	}
+
 	// Pull last 8 non-revoked messages
 	var rawMsgs []models.Message
 	s.db.Where("conversation_id = ? AND is_revoked = 0", body.ConversationID).
@@ -1514,7 +1520,7 @@ func (s *Server) handleAIReply(w http.ResponseWriter, r *http.Request, userID ui
 		})
 	}
 
-	suggestions, err := s.aiService.CallSmartReply(*cfg, contexts)
+	suggestions, err := s.aiService.CallSmartReply(r.Context(), *cfg, contexts)
 	if err != nil || len(suggestions) == 0 {
 		log.Printf("[AIReply] upstream AI call failed: %v, falling back", err)
 		s.jsonResponse(w, map[string]interface{}{
@@ -1542,6 +1548,12 @@ func (s *Server) handleAISummary(w http.ResponseWriter, r *http.Request, userID 
 
 	if body.ConversationID == "" {
 		s.jsonError(w, http.StatusBadRequest, "conversation_id required")
+		return
+	}
+
+	var conv models.Conversation
+	if err := s.db.Where("user_id = ? AND conversation_id = ?", userID, body.ConversationID).First(&conv).Error; err != nil {
+		s.jsonError(w, http.StatusForbidden, "Access denied: you are not a participant of this conversation")
 		return
 	}
 
@@ -1611,7 +1623,7 @@ func (s *Server) handleAISummary(w http.ResponseWriter, r *http.Request, userID 
 	// Try upstream LLM summary if APIKey configured
 	aiCfg, err := s.aiService.GetAIConfig(userID)
 	if err == nil && aiCfg != nil && aiCfg.APIKey != "" {
-		aiSummary, err := s.aiService.CallSmartSummary(*aiCfg, contexts, body.Lang)
+		aiSummary, err := s.aiService.CallSmartSummary(r.Context(), *aiCfg, contexts, body.Lang)
 		if err == nil && aiSummary != "" {
 			s.jsonResponse(w, map[string]interface{}{
 				"summary":       aiSummary,

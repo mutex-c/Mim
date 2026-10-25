@@ -1,11 +1,13 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -51,7 +53,7 @@ func TestAIService_GenerateReply(t *testing.T) {
 		{SenderName: "Alice", Content: "方案写好了，麻烦过目一下", IsMe: false},
 	}
 
-	suggestions, err := svc.CallSmartReply(cfg, messages)
+	suggestions, err := svc.CallSmartReply(context.Background(), cfg, messages)
 	if err != nil {
 		t.Fatalf("CallSmartReply failed: %v", err)
 	}
@@ -104,7 +106,7 @@ func TestAIService_SmartSummary(t *testing.T) {
 		{SenderName: "Bob", Content: "好的，赞成", IsMe: true},
 	}
 
-	summary, err := svc.CallSmartSummary(cfg, messages, "zh")
+	summary, err := svc.CallSmartSummary(context.Background(), cfg, messages, "zh")
 	if err != nil {
 		t.Fatalf("CallSmartSummary failed: %v", err)
 	}
@@ -112,7 +114,7 @@ func TestAIService_SmartSummary(t *testing.T) {
 		t.Errorf("summary missing expected heading: %s", summary)
 	}
 
-	summaryEn, err := svc.CallSmartSummary(cfg, messages, "en")
+	summaryEn, err := svc.CallSmartSummary(context.Background(), cfg, messages, "en")
 	if err != nil {
 		t.Fatalf("CallSmartSummary (en) failed: %v", err)
 	}
@@ -168,6 +170,28 @@ func TestAIService_DBConfig(t *testing.T) {
 	}
 	if loaded.Temperature != 0.8 {
 		t.Errorf("expected temperature 0.8, got %f", loaded.Temperature)
+	}
+
+	// Test partial update preserves APIKey if empty key passed
+	partialSave := AIConfig{
+		Provider:    "deepseek",
+		BaseURL:     "https://api.deepseek.com/v1",
+		APIKey:      "", // empty, should NOT wipe existing key
+		Model:       "deepseek-chat",
+		Temperature: 0.5,
+	}
+	if err := svc.SaveAIConfig(1001, &partialSave); err != nil {
+		t.Fatalf("SaveAIConfig partial update failed: %v", err)
+	}
+	reloaded, err := svc.GetAIConfig(1001)
+	if err != nil {
+		t.Fatalf("GetAIConfig after partial update failed: %v", err)
+	}
+	if reloaded.APIKey != "sk-custom-secret-token" {
+		t.Errorf("expected api_key to be preserved as 'sk-custom-secret-token', got %s", reloaded.APIKey)
+	}
+	if reloaded.Model != "deepseek-chat" {
+		t.Errorf("expected model updated to 'deepseek-chat', got %s", reloaded.Model)
 	}
 }
 
@@ -240,7 +264,7 @@ func TestAIService_UpstreamError(t *testing.T) {
 		APIKey:  "test-key",
 	}
 
-	_, err := svc.CallSmartReply(cfg, []ChatMessageContext{{SenderName: "User", Content: "Hi"}})
+	_, err := svc.CallSmartReply(context.Background(), cfg, []ChatMessageContext{{SenderName: "User", Content: "Hi"}})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -248,7 +272,7 @@ func TestAIService_UpstreamError(t *testing.T) {
 		t.Errorf("expected 429 in error message, got %v", err)
 	}
 
-	_, err = svc.CallSmartSummary(cfg, []ChatMessageContext{{SenderName: "User", Content: "Hi"}}, "zh")
+	_, err = svc.CallSmartSummary(context.Background(), cfg, []ChatMessageContext{{SenderName: "User", Content: "Hi"}}, "zh")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -256,3 +280,26 @@ func TestAIService_UpstreamError(t *testing.T) {
 		t.Errorf("expected 429 in error message, got %v", err)
 	}
 }
+
+func TestAIService_ContextCancellation(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockServer.Close()
+
+	svc := NewAIService(nil)
+	cfg := AIConfig{
+		BaseURL: mockServer.URL,
+		APIKey:  "test-key",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := svc.CallSmartReply(ctx, cfg, []ChatMessageContext{{SenderName: "User", Content: "Hi"}})
+	if err == nil {
+		t.Fatal("expected error on cancelled context, got nil")
+	}
+}
+

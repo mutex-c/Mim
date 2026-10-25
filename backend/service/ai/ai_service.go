@@ -117,6 +117,7 @@ func (s *AIService) SaveAIConfig(userID uint64, cfg *AIConfig) error {
 		return errors.New("database not initialized")
 	}
 
+	trimmedKey := strings.TrimSpace(cfg.APIKey)
 	var rec UserAIConfig
 	err := s.db.First(&rec, "user_id = ?", userID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -124,7 +125,7 @@ func (s *AIService) SaveAIConfig(userID uint64, cfg *AIConfig) error {
 			UserID:      userID,
 			Provider:    cfg.Provider,
 			BaseURL:     cfg.BaseURL,
-			APIKey:      cfg.APIKey,
+			APIKey:      trimmedKey,
 			Model:       cfg.Model,
 			Temperature: cfg.Temperature,
 			UpdatedAt:   time.Now(),
@@ -136,7 +137,10 @@ func (s *AIService) SaveAIConfig(userID uint64, cfg *AIConfig) error {
 
 	rec.Provider = cfg.Provider
 	rec.BaseURL = cfg.BaseURL
-	rec.APIKey = cfg.APIKey
+	// Preserve existing API key if incoming key is empty
+	if trimmedKey != "" {
+		rec.APIKey = trimmedKey
+	}
 	rec.Model = cfg.Model
 	if cfg.Temperature > 0 {
 		rec.Temperature = cfg.Temperature
@@ -177,7 +181,7 @@ func cleanJSONResponse(raw string) string {
 }
 
 // CallSmartReply invokes the OpenAI-compatible endpoint to generate 3 reply suggestions
-func (s *AIService) CallSmartReply(cfg AIConfig, contexts []ChatMessageContext) ([]ReplySuggestion, error) {
+func (s *AIService) CallSmartReply(ctx context.Context, cfg AIConfig, contexts []ChatMessageContext) ([]ReplySuggestion, error) {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.deepseek.com/v1"
 	}
@@ -224,10 +228,13 @@ func (s *AIService) CallSmartReply(cfg AIConfig, contexts []ChatMessageContext) 
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(reqBytes))
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewReader(reqBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +249,7 @@ func (s *AIService) CallSmartReply(cfg AIConfig, contexts []ChatMessageContext) 
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +282,7 @@ func (s *AIService) CallSmartReply(cfg AIConfig, contexts []ChatMessageContext) 
 }
 
 // CallSmartSummary invokes the OpenAI-compatible endpoint to generate structured meeting/chat minutes
-func (s *AIService) CallSmartSummary(cfg AIConfig, contexts []ChatMessageContext, lang string) (string, error) {
+func (s *AIService) CallSmartSummary(ctx context.Context, cfg AIConfig, contexts []ChatMessageContext, lang string) (string, error) {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.deepseek.com/v1"
 	}
@@ -324,10 +331,13 @@ func (s *AIService) CallSmartSummary(cfg AIConfig, contexts []ChatMessageContext
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(reqBytes))
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewReader(reqBytes))
 	if err != nil {
 		return "", err
 	}
@@ -342,7 +352,7 @@ func (s *AIService) CallSmartSummary(cfg AIConfig, contexts []ChatMessageContext
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
 		return "", err
 	}
