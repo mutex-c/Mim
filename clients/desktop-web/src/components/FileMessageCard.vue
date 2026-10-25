@@ -169,14 +169,15 @@
 export const formatMiddleEllipsis = (name: string, maxLen = 22): string => {
   if (!name || name.length <= maxLen) return name;
   const lastDot = name.lastIndexOf('.');
-  const ext = lastDot !== -1 ? name.slice(lastDot) : '';
-  const base = lastDot !== -1 ? name.slice(0, lastDot) : name;
-  const keepEnd = Math.max(ext.length + 3, 5);
-  const keepStart = maxLen - keepEnd - 3;
-  if (keepStart <= 2) {
-    return base.slice(0, 8) + '...' + ext;
-  }
-  return base.slice(0, keepStart) + '...' + base.slice(-2) + ext;
+  const ext = lastDot > 0 ? name.slice(lastDot) : '';
+  const base = lastDot > 0 ? name.slice(0, lastDot) : name;
+
+  const maxBaseLen = Math.max(4, maxLen - ext.length - 3);
+  const leftLen = Math.ceil(maxBaseLen / 2);
+  const rightLen = Math.floor(maxBaseLen / 2);
+
+  if (base.length <= maxBaseLen) return base + '...' + ext;
+  return base.slice(0, leftLen) + '...' + base.slice(-rightLen) + ext;
 };
 </script>
 

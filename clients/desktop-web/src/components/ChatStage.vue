@@ -1754,7 +1754,7 @@ const onCompositionEnd = () => {
   if (cooldownTimer) clearTimeout(cooldownTimer);
   cooldownTimer = setTimeout(() => {
     compositionCooldown = false;
-  }, 500); // 选字结束后 500ms 内的回车彻底拦截
+  }, 100); // 100ms 阻断选字尾随回车，同时保障熟练打字快速发送
 };
 
 const onInputKeyDown = (e: KeyboardEvent) => {
@@ -1771,8 +1771,11 @@ const onInputKeyDown = (e: KeyboardEvent) => {
 // 规范 2：智能滚动吸底与「跳至最新」悬浮药丸 (Smart Scroll Bottom Following & Jump Pill)
 const autoFollowBottom = ref(true);
 const showJumpToBottom = ref(false);
+let isProgrammaticScrolling = false;
+let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 const onMessagesScroll = (e: Event) => {
+  if (isProgrammaticScrolling) return;
   const el = e.target as HTMLElement;
   if (!el) return;
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -2023,6 +2026,15 @@ const handleSend = () => {
 
 const scrollToBottom = (force = false) => {
   if (!force && !autoFollowBottom.value) return;
+  if (force) {
+    isProgrammaticScrolling = true;
+    showJumpToBottom.value = false;
+    autoFollowBottom.value = true;
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      isProgrammaticScrolling = false;
+    }, 350);
+  }
   nextTick(() => {
     if (scrollContainer.value) {
       if (force) {
@@ -2030,8 +2042,6 @@ const scrollToBottom = (force = false) => {
           top: scrollContainer.value.scrollHeight,
           behavior: 'smooth',
         });
-        autoFollowBottom.value = true;
-        showJumpToBottom.value = false;
       } else {
         scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
       }
@@ -2788,6 +2798,10 @@ onBeforeUnmount(() => {
     clearTimeout(cooldownTimer);
     cooldownTimer = null;
   }
+  if (scrollTimer) {
+    clearTimeout(scrollTimer);
+    scrollTimer = null;
+  }
 });
 
 onUnmounted(() => {
@@ -2798,6 +2812,10 @@ onUnmounted(() => {
   if (cooldownTimer) {
     clearTimeout(cooldownTimer);
     cooldownTimer = null;
+  }
+  if (scrollTimer) {
+    clearTimeout(scrollTimer);
+    scrollTimer = null;
   }
   window.removeEventListener('click', closePopupOnGlobalClick);
   window.removeEventListener('keydown', handleEscKey);

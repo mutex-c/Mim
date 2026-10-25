@@ -289,9 +289,6 @@ const onMouseMove = (moveEvent: MouseEvent) => {
   if (newWidth > maxWidth) {
     newWidth = maxWidth;
   }
-  if (newWidth / window.innerWidth > maxRatio) {
-    newWidth = window.innerWidth * maxRatio;
-  }
   chatStore.setSidebarWidth(newWidth);
 };
 
