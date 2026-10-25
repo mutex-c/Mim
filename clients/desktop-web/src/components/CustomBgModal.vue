@@ -12,7 +12,7 @@
       <!-- Header -->
       <div class="flex items-center justify-between border-b border-black/5 dark:border-white/10 pb-3">
         <div class="flex items-center gap-2">
-          <span class="text-base" :class="themeStore.currentPalette === 'vodyanitsa' ? 'text-cyan-400' : 'text-mim-accent'">🖼</span>
+          <Palette class="w-4 h-4 inline-icon" :class="themeStore.currentPalette === 'vodyanitsa' ? 'text-cyan-400' : 'text-mim-accent'" />
           <h3 class="text-sm font-semibold tracking-wide">
             {{ langStore.currentLang === 'zh' ? '自定义聊天背景图' : 'Custom Chat Wallpaper' }}
           </h3>
@@ -132,7 +132,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { X, UploadCloud } from 'lucide-vue-next';
+import { X, UploadCloud, Palette } from 'lucide-vue-next';
 import { useThemeStore } from '../stores/theme';
 import { useLangStore } from '../stores/lang';
 

@@ -130,7 +130,7 @@
       <!-- Header -->
       <div class="flex items-center justify-between border-b border-[#38bdf8]/30 pb-3">
         <div class="flex items-center gap-2">
-          <span class="text-cyan-400 font-bold text-sm">💧</span>
+          <Sparkles class="w-4 h-4 text-cyan-400 inline-icon" />
           <h3 class="text-xs font-bold tracking-widest text-[#e0f2fe] uppercase">
             科洛列夫茨基剧团 · 首席档案
           </h3>
@@ -283,7 +283,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { X, MessageSquare } from 'lucide-vue-next';
+import { X, MessageSquare, Sparkles } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { useChatStore } from '../stores/chat';
 import { useThemeStore } from '../stores/theme';

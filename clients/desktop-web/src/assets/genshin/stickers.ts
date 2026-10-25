@@ -13,13 +13,13 @@ export interface GenshinSticker {
 
 export const GENSHIN_CATEGORIES = [
   { id: 'all', nameZh: '全部台词', icon: '✦' },
-  { id: 'wish', nameZh: '抽卡与名梗', icon: '⭐' },
-  { id: 'geo', nameZh: '岩之厚重', icon: '⛰️' },
-  { id: 'hydro', nameZh: '水之盛宴', icon: '💧' },
-  { id: 'electro', nameZh: '鸣雷永恒', icon: '⚡' },
-  { id: 'dendro', nameZh: '草木智慧', icon: '🌿' },
-  { id: 'anemo', nameZh: '高天之风', icon: '🍃' },
-  { id: 'pyro', nameZh: '炽烈往生', icon: '🔥' },
+  { id: 'wish', nameZh: '抽卡与名梗', icon: '★' },
+  { id: 'geo', nameZh: '岩之厚重', icon: '◆' },
+  { id: 'hydro', nameZh: '水之盛宴', icon: '◇' },
+  { id: 'electro', nameZh: '鸣雷永恒', icon: '✦' },
+  { id: 'dendro', nameZh: '草木智慧', icon: '✤' },
+  { id: 'anemo', nameZh: '高天之风', icon: '❖' },
+  { id: 'pyro', nameZh: '炽烈往生', icon: '▲' },
 ];
 
 export const GENSHIN_STICKERS: GenshinSticker[] = [
@@ -28,7 +28,7 @@ export const GENSHIN_STICKERS: GenshinSticker[] = [
     id: 's_wish_1',
     category: 'wish',
     character: '祈愿',
-    quote: '金色传说！十连双黄！⭐⭐⭐⭐⭐',
+    quote: '金色传说！十连双黄！★★★★★',
     badge: '欧皇降临',
     color: '#eab308',
     textColor: '#854d0e',

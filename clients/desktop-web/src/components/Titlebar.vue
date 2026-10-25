@@ -8,7 +8,7 @@
     <div class="flex items-center gap-2.5 pointer-events-none" data-tauri-drag-region>
       <div class="flex items-center gap-1.5 font-semibold text-mim-light-text dark:text-mim-dark-text tracking-tight text-xs">
         <template v-if="themeStore.currentPalette === 'vodyanitsa'">
-          <Snowflake class="w-4 h-4 text-cyan-300 drop-shadow-[0_0_6px_rgba(56,189,248,0.8)] inline-icon shrink-0" />
+          <img :src="iconSnowflake" alt="Vodyanitsa" class="w-4 h-4 object-contain inline-block shrink-0 drop-shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
           <span class="text-white font-semibold tracking-wide text-xs drop-shadow-[0_0_6px_rgba(56,189,248,0.4)]">
             Vodyanitsa-Mim
           </span>
@@ -136,11 +136,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { ShieldCheck, Search, Keyboard, Minus, Square, X, Snowflake } from 'lucide-vue-next';
+import { ShieldCheck, Search, Keyboard, Minus, Square, X } from 'lucide-vue-next';
 import { useChatStore } from '../stores/chat';
 import { useLangStore } from '../stores/lang';
 import { useThemeStore } from '../stores/theme';
 import searchMelody from '../assets/vodyanitsa/images/titlebar_search_melody.png';
+import iconSnowflake from '../assets/vodyanitsa/images/titlebar_snowflake.png';
 
 defineEmits(['open-command-palette', 'open-shortcuts']);
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { Sparkles, X, User, ShieldAlert, MessageSquare } from 'lucide-vue-next';
 import { playGenshinClick, playPrimogemSparkle, playWishChord, playDropReveal } from '../utils/genshinAudio';
 import { GENSHIN_CHARACTERS } from '../assets/genshin/characters';
 
@@ -269,7 +270,7 @@ function handleShareToChat() {
         <div class="flex items-center gap-4">
           <!-- Fate -->
           <div class="flex items-center gap-1.5 px-3 py-1 bg-black/50 border border-[#caa159]/50 rounded-full text-xs font-medium text-[#f3e7c4]">
-            <span class="text-pink-400">🔮</span>
+            <Sparkles class="w-3.5 h-3.5 text-pink-400 inline-icon" />
             <span>{{ intertwinedFates }}</span>
           </div>
 
@@ -291,7 +292,7 @@ function handleShareToChat() {
             @click="handleClose"
             class="w-8 h-8 rounded-full border border-[#caa159]/60 bg-[#2d1b22] text-[#fca5a5] hover:bg-red-900/60 flex items-center justify-center font-bold text-sm transition-all"
           >
-            ✕
+            <X class="w-4 h-4 inline-icon" />
           </button>
         </div>
       </div>
@@ -447,8 +448,9 @@ function handleShareToChat() {
                   class="w-16 h-16 md:w-20 md:h-20 object-contain drop-shadow"
                   :alt="item.name"
                 />
-                <div v-else class="w-14 h-14 rounded-full flex items-center justify-center bg-black/40 border border-white/20 text-2xl">
-                  {{ item.type === 'character' ? '👤' : '⚔️' }}
+                <div v-else class="w-14 h-14 rounded-full flex items-center justify-center bg-black/40 border border-white/20">
+                  <User v-if="item.type === 'character'" class="w-6 h-6 text-amber-200 inline-icon" />
+                  <ShieldAlert v-else class="w-6 h-6 text-amber-200 inline-icon" />
                 </div>
               </div>
 
@@ -469,7 +471,7 @@ function handleShareToChat() {
         <div class="flex items-center justify-between pt-4 border-t border-[#caa159]/30">
           <button
             @click="wishPhase = 'none'"
-            class="px-5 py-2 rounded-xl border border-[#caa159]/50 text-xs font-semibold text-[#f3e7c4] hover:bg-white/10 transition-all"
+            class="px-5 py-2 rounded-xl border border-[#caa159]/50 text-xs font-semibold text-[#f3e7c4] hover:bg-white/10 transition-all cursor-pointer"
           >
             ← 返回祈愿
           </button>
@@ -477,9 +479,9 @@ function handleShareToChat() {
           <div class="flex items-center gap-3">
             <button
               @click="handleShareToChat"
-              class="px-6 py-2 rounded-xl bg-gradient-to-r from-[#22c55e] to-[#15803d] text-white text-xs font-bold shadow-lg hover:from-[#16a34a] hover:to-[#166534] transition-all flex items-center gap-2"
+              class="px-6 py-2 rounded-xl bg-gradient-to-r from-[#22c55e] to-[#15803d] text-white text-xs font-bold shadow-lg hover:from-[#16a34a] hover:to-[#166534] transition-all flex items-center gap-2 cursor-pointer"
             >
-              <span>💬</span>
+              <MessageSquare class="w-3.5 h-3.5 inline-icon" />
               <span>分享祈愿到聊天</span>
             </button>
 

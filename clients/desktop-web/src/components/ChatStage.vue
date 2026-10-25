@@ -44,7 +44,7 @@
               <h2 class="text-sm font-semibold text-mim-light-text dark:text-mim-dark-text truncate flex items-center gap-1.5">
                 <span>{{ chatStore.activeConversation?.title }}</span>
                 <span v-if="themeStore.currentPalette === 'genshin'" class="text-amber-500 font-bold genshin-gold-glow text-xs" title="原神星穹认证">✦</span>
-                <span v-else-if="themeStore.currentPalette === 'vodyanitsa'" class="text-cyan-400 font-bold text-xs" title="科洛列夫茨基剧团认证">💧</span>
+                <img v-else-if="themeStore.currentPalette === 'vodyanitsa'" :src="iconCrest" class="w-4 h-4 object-contain inline-block shrink-0 drop-shadow-[0_0_6px_rgba(56,189,248,0.7)]" title="科洛列夫茨基剧团认证" />
               </h2>
               <span v-if="isGroup" class="text-xs text-mim-light-muted font-normal">
                 ({{ groupMembers.length }}人)
@@ -85,7 +85,8 @@
               : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
             :title="langStore.currentLang === 'zh' ? '自定义聊天背景图与壁纸' : 'Custom Chat Wallpaper'"
           >
-            <Palette class="w-4 h-4 inline-icon" />
+            <img v-if="themeStore.currentPalette === 'vodyanitsa'" :src="iconPalette" class="w-5 h-5 object-contain inline-block shrink-0 drop-shadow-[0_0_6px_rgba(56,189,248,0.5)]" />
+            <Palette v-else class="w-4 h-4 inline-icon" />
           </button>
 
           <button
@@ -288,6 +289,22 @@
                     </span>
                     <span class="text-[10px] text-[#bae6fd]/80 text-center px-1">
                       {{ getVodyanitsaStickerById(parseVodyanitsaStickerId(msg.content))?.caption }}
+                    </span>
+                  </div>
+
+                  <!-- Custom User Added Sticker Display -->
+                  <div
+                    v-else-if="isCustomSticker(msg.content)"
+                    class="flex flex-col items-center p-2 rounded-2xl bg-[#091124]/95 border border-[#38bdf8]/50 shadow-xl max-w-[200px] select-none hover:scale-105 transition-transform"
+                    @contextmenu.prevent.stop="handleMessageContextMenu($event, msg)"
+                  >
+                    <img
+                      :src="parseCustomSticker(msg.content)?.url"
+                      :alt="parseCustomSticker(msg.content)?.name || '自定义表情'"
+                      class="w-32 h-32 object-contain rounded-lg"
+                    />
+                    <span v-if="parseCustomSticker(msg.content)?.name" class="text-xs font-bold text-[#7dd3fc] mt-1 truncate max-w-full">
+                      {{ parseCustomSticker(msg.content)?.name }}
                     </span>
                   </div>
 
@@ -635,10 +652,10 @@
         >
           <!-- Snowflake corner pips in Vodyanitsa mode -->
           <template v-if="themeStore.currentPalette === 'vodyanitsa'">
-            <span class="corner-snowflake tl">❄</span>
-            <span class="corner-snowflake tr">❄</span>
-            <span class="corner-snowflake bl">❄</span>
-            <span class="corner-snowflake br">❄</span>
+            <span class="corner-snowflake tl">✦</span>
+            <span class="corner-snowflake tr">✦</span>
+            <span class="corner-snowflake bl">✦</span>
+            <span class="corner-snowflake br">✦</span>
           </template>
 
           <!-- Message Textarea -->
@@ -712,18 +729,19 @@
                 <button
                   @click="showVodyanitsaStickers = !showVodyanitsaStickers; showGenshinStickers = false"
                   :disabled="isMutedInGroup"
-                  class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer"
+                  class="px-2.5 h-8 rounded-lg flex items-center gap-1.5 text-xs transition-all disabled:opacity-40 cursor-pointer"
                   :class="showVodyanitsaStickers
                     ? 'bg-cyan-500/25 text-white font-bold border border-cyan-300 shadow-[0_0_12px_rgba(56,189,248,0.4)]'
                     : 'bg-cyan-950/40 text-cyan-200 border border-cyan-400/40 hover:border-cyan-300 hover:bg-cyan-900/50'"
                   title="科洛列夫茨基剧团 · 沃雅妮莎专属微表情"
                 >
-                  <span class="text-xs">🌸</span>
+                  <img :src="iconLily" alt="" class="w-3.5 h-3.5 object-contain inline-block shrink-0" />
                   <span class="font-medium text-[11px]">沃雅贴纸</span>
                 </button>
                 <VodyanitsaStickerPicker
                   v-if="showVodyanitsaStickers"
                   @select="handleSelectVodyanitsaSticker"
+                  @select-custom="handleSelectCustomSticker"
                   @close="showVodyanitsaStickers = false"
                 />
               </div>
@@ -733,10 +751,10 @@
                 v-if="themeStore.currentPalette === 'vodyanitsa'"
                 @click="showWishModal = true; playPrimogemSparkle()"
                 :disabled="isMutedInGroup"
-                class="px-3 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer bg-gradient-to-r from-amber-600/40 via-amber-500/30 to-amber-700/40 text-amber-200 font-bold border border-amber-400/50 hover:border-amber-300 hover:shadow-[0_0_12px_rgba(234,179,8,0.4)]"
+                class="px-3 h-8 rounded-lg flex items-center gap-1.5 text-xs transition-all disabled:opacity-40 cursor-pointer bg-gradient-to-r from-amber-600/40 via-amber-500/30 to-amber-700/40 text-amber-200 font-bold border border-amber-400/50 hover:border-amber-300 hover:shadow-[0_0_12px_rgba(234,179,8,0.4)]"
                 title="「唤春角笛」- 沃雅妮莎角色祈愿"
               >
-                <span class="text-xs">📯</span>
+                <img :src="iconConch" alt="" class="w-3.5 h-3.5 object-contain inline-block shrink-0" />
                 <span class="font-bold text-[11px] tracking-wider">唤春角笛</span>
               </button>
 
@@ -751,7 +769,7 @@
                     : 'text-amber-600/80 dark:text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-300'"
                   title="提瓦特派蒙画作与经典台词"
                 >
-                  <span class="text-xs genshin-gold-glow">✦</span>
+                  <Sparkles class="w-3.5 h-3.5 inline-icon text-amber-500" />
                   <span class="font-medium text-[11px]">派蒙贴纸</span>
                 </button>
                 <GenshinStickerPicker
@@ -770,7 +788,7 @@
                 class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-purple-500/15 text-amber-600 dark:text-amber-300 font-bold border border-amber-500/30 hover:border-amber-400 hover:shadow-xs"
                 title="提瓦特祈愿抽卡系统"
               >
-                <span class="text-xs">🔮</span>
+                <Sparkles class="w-3.5 h-3.5 inline-icon text-amber-400" />
                 <span class="font-bold text-[11px] tracking-wider">祈愿</span>
               </button>
             </div>
@@ -1412,6 +1430,7 @@ import {
   FlipHorizontal,
   ArrowLeftRight,
   Trash2,
+  FolderPlus,
 } from 'lucide-vue-next';
 import { useChatStore, MessageItem } from '../stores/chat';
 import { useLangStore } from '../stores/lang';
@@ -1431,6 +1450,11 @@ import type { GenshinSticker } from '../assets/genshin/stickers';
 import { CHIBI_STICKERS, type ChibiSticker } from '../assets/genshin/chibiStickers';
 import { getVodyanitsaStickerById } from '../assets/vodyanitsa/vodyanitsaStickers';
 import vodyanitsaAvatar from '../assets/vodyanitsa/images/vodyanitsa_avatar.png';
+import iconLily from '../assets/vodyanitsa/dock/nav_contacts_lily.png';
+import iconConch from '../assets/vodyanitsa/dock/nav_calls_conch.png';
+import iconCrest from '../assets/vodyanitsa/images/header_vodyanitsa_crest.png';
+import iconPalette from '../assets/vodyanitsa/images/icon_stage_palette.png';
+import { useCustomStickersStore, type CustomSticker } from '../stores/customStickers';
 import { playGenshinClick, playPrimogemSparkle } from '../utils/genshinAudio';
 import { resolveApiUrl } from '../utils/api';
 
@@ -1439,6 +1463,7 @@ const chatStore = useChatStore();
 const langStore = useLangStore();
 const themeStore = useThemeStore();
 const contextMenuStore = useContextMenuStore();
+const customStore = useCustomStickersStore();
 
 const showGenshinStickers = ref(false);
 const showVodyanitsaStickers = ref(false);
@@ -1467,6 +1492,31 @@ const handleSelectVodyanitsaSticker = (stickerId: string) => {
   displayedQuote.value = null;
   showVodyanitsaStickers.value = false;
   scrollToBottom();
+};
+
+const handleSelectCustomSticker = (sticker: CustomSticker) => {
+  const payload = JSON.stringify({ id: sticker.id, name: sticker.name, url: sticker.url });
+  chatStore.sendMessage(`[CUSTOM_STICKER]:${encodeURIComponent(payload)}`, activeQuote.value || undefined);
+  activeQuote.value = null;
+  displayedQuote.value = null;
+  showVodyanitsaStickers.value = false;
+  scrollToBottom();
+};
+
+const isCustomSticker = (content: string) => {
+  return typeof content === 'string' && content.includes('[CUSTOM_STICKER]:');
+};
+
+const parseCustomSticker = (content: string): { name: string; url: string } | null => {
+  try {
+    const raw = content.replace('[CUSTOM_STICKER]:', '').trim();
+    const found = customStore.getStickerById(raw);
+    if (found) return { name: found.name, url: found.url };
+    const parsed = JSON.parse(decodeURIComponent(raw));
+    return { name: parsed.name || '自定义表情', url: parsed.url };
+  } catch {
+    return null;
+  }
 };
 
 const isVodyanitsaSticker = (content: string) => {
@@ -1849,6 +1899,42 @@ const handleMessageContextMenu = (e: MouseEvent, msg: MessageItem) => {
         link.click();
       },
     });
+  }
+
+  if (msg.msgType === 'image') {
+    items.push({
+      id: 'add-image-sticker',
+      label: '添加到自定义表情',
+      icon: FolderPlus,
+      action: () => {
+        const url = resolveApiUrl(msg.content);
+        customStore.addSticker('收藏图片表情', url);
+      },
+    });
+  } else if (isVodyanitsaSticker(msg.content)) {
+    const stk = getVodyanitsaStickerById(parseVodyanitsaStickerId(msg.content));
+    if (stk) {
+      items.push({
+        id: 'add-vodyanitsa-sticker',
+        label: '收藏到自定义表情',
+        icon: FolderPlus,
+        action: () => {
+          customStore.addSticker(stk.name, stk.imageSrc);
+        },
+      });
+    }
+  } else if (isCustomSticker(msg.content)) {
+    const parsed = parseCustomSticker(msg.content);
+    if (parsed) {
+      items.push({
+        id: 'add-custom-sticker',
+        label: '收藏到自定义表情',
+        icon: FolderPlus,
+        action: () => {
+          customStore.addSticker(parsed.name, parsed.url);
+        },
+      });
+    }
   }
 
   if (msg.isMe && !msg.isRevoked) {

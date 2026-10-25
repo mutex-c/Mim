@@ -14,7 +14,7 @@
         @click="handleClose"
         class="w-6 h-6 rounded-lg flex items-center justify-center text-[#caa159] hover:bg-white/10 transition-colors cursor-pointer text-xs"
       >
-        ✕
+        <X class="w-3.5 h-3.5 inline-icon" />
       </button>
     </div>
 
@@ -27,7 +27,7 @@
           ? 'bg-gradient-to-r from-[#d97706] to-[#b45309] text-white shadow-md'
           : 'text-[#d1d5db]/70 hover:text-white hover:bg-white/5'"
       >
-        <span>🎨</span>
+        <Palette class="w-3.5 h-3.5 inline-icon" />
         <span>派蒙画作 ({{ chibiList.length }})</span>
       </button>
 
@@ -38,7 +38,7 @@
           ? 'bg-gradient-to-r from-[#d97706] to-[#b45309] text-white shadow-md'
           : 'text-[#d1d5db]/70 hover:text-white hover:bg-white/5'"
       >
-        <span>💬</span>
+        <MessageSquare class="w-3.5 h-3.5 inline-icon" />
         <span>名梗台词 ({{ filteredQuotes.length }})</span>
       </button>
     </div>
@@ -108,7 +108,7 @@
               </span>
             </div>
             <span class="text-[10px] text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity font-semibold">
-              点击发送 💬
+              点击发送
             </span>
           </div>
           <p class="text-xs text-[#f3eed8] font-medium leading-relaxed group-hover:text-amber-200 transition-colors">
@@ -128,6 +128,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { X, Palette, MessageSquare } from 'lucide-vue-next';
 import { GENSHIN_CATEGORIES, GENSHIN_STICKERS, CHIBI_STICKERS, type GenshinSticker, type ChibiSticker } from '../assets/genshin/stickers';
 import { playGenshinClick, playPrimogemSparkle } from '../utils/genshinAudio';
 
