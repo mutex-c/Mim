@@ -154,11 +154,10 @@
             }"
           >
             <img
-              v-if="user?.avatar && (user.avatar.startsWith('http') || user.avatar.startsWith('data:image'))"
-              :src="user.avatar"
+              :src="vodyanitsaAvatar"
+              alt="沃雅妮莎"
               class="w-full h-full object-cover"
             />
-            <span v-else>{{ user?.avatar || (user?.nickname ? user.nickname.substring(0, 2).toUpperCase() : 'MI') }}</span>
           </div>
 
           <!-- Vision Element Badge (Hydro) -->
@@ -296,6 +295,7 @@ import splashFurina from '../assets/genshin/images/splash_furina.png';
 import splashRaiden from '../assets/genshin/images/splash_raiden.png';
 import splashHutao from '../assets/genshin/images/splash_hutao.png';
 import splashVodyanitsa from '../assets/vodyanitsa/images/splash_vodyanitsa.png';
+import vodyanitsaAvatar from '../assets/vodyanitsa/images/vodyanitsa_avatar.png';
 
 const props = defineProps<{
   user: any;

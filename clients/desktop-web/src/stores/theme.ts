@@ -59,7 +59,24 @@ export const PALETTES: PaletteOption[] = [
 export const useThemeStore = defineStore('theme', () => {
   const currentMode = ref<ThemeMode>((localStorage.getItem('mim_theme_mode') as ThemeMode) || 'system');
   const currentPalette = ref<ColorPalette>((localStorage.getItem('mim_palette') as ColorPalette) || 'pine');
+  const customBgUrl = ref<string | null>(localStorage.getItem('mim_custom_bg') || null);
+  const customBgOpacity = ref<number>(parseFloat(localStorage.getItem('mim_custom_bg_opacity') || '1'));
+  const customBgBlur = ref<number>(parseFloat(localStorage.getItem('mim_custom_bg_blur') || '0'));
   const isDark = ref<boolean>(false);
+
+  const applyCustomBg = () => {
+    if (customBgUrl.value) {
+      document.documentElement.style.setProperty('--mim-custom-bg', `url("${customBgUrl.value}")`);
+      document.documentElement.style.setProperty('--mim-custom-bg-opacity', customBgOpacity.value.toString());
+      document.documentElement.style.setProperty('--mim-custom-bg-blur', `${customBgBlur.value}px`);
+      document.documentElement.classList.add('has-custom-bg');
+    } else {
+      document.documentElement.style.removeProperty('--mim-custom-bg');
+      document.documentElement.style.removeProperty('--mim-custom-bg-opacity');
+      document.documentElement.style.removeProperty('--mim-custom-bg-blur');
+      document.documentElement.classList.remove('has-custom-bg');
+    }
+  };
 
   const updateActualTheme = () => {
     if (currentMode.value === 'system') {
@@ -78,6 +95,7 @@ export const useThemeStore = defineStore('theme', () => {
     }
 
     document.documentElement.dataset.palette = currentPalette.value;
+    applyCustomBg();
   };
 
   const setTheme = (mode: ThemeMode) => {
@@ -92,6 +110,28 @@ export const useThemeStore = defineStore('theme', () => {
     updateActualTheme();
   };
 
+  const setCustomBg = (url: string | null) => {
+    customBgUrl.value = url;
+    if (url) {
+      localStorage.setItem('mim_custom_bg', url);
+    } else {
+      localStorage.removeItem('mim_custom_bg');
+    }
+    applyCustomBg();
+  };
+
+  const setCustomBgOpacity = (opacity: number) => {
+    customBgOpacity.value = opacity;
+    localStorage.setItem('mim_custom_bg_opacity', opacity.toString());
+    applyCustomBg();
+  };
+
+  const setCustomBgBlur = (blur: number) => {
+    customBgBlur.value = blur;
+    localStorage.setItem('mim_custom_bg_blur', blur.toString());
+    applyCustomBg();
+  };
+
   // Initialize and watch system changes
   updateActualTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -103,9 +143,15 @@ export const useThemeStore = defineStore('theme', () => {
   return {
     currentMode,
     currentPalette,
+    customBgUrl,
+    customBgOpacity,
+    customBgBlur,
     isDark,
     setTheme,
     setPalette,
+    setCustomBg,
+    setCustomBgOpacity,
+    setCustomBgBlur,
     palettes: PALETTES,
   };
 });

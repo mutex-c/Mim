@@ -17,7 +17,7 @@
         </button>
         <button
           @click="startQuickCall('video')"
-          class="px-3 h-8 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+          class="px-3 h-8 rounded-lg mim-btn-primary text-xs font-medium flex items-center gap-1.5 shadow-sm"
         >
           <Video class="w-3.5 h-3.5 inline-icon" />
           <span>{{ langStore.t('calls.newVideoCall') }}</span>
@@ -39,7 +39,7 @@
         <div class="flex items-center gap-3">
           <div
             class="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-semibold"
-            :class="call.call_type === 'video' ? 'bg-purple-600/15 text-purple-600 dark:text-purple-400' : 'bg-emerald-600/15 text-emerald-600 dark:text-emerald-400'"
+            :class="call.call_type === 'video' ? 'bg-mim-accent-subtle text-mim-accent' : 'bg-emerald-600/15 text-emerald-600 dark:text-emerald-400'"
           >
             <Video v-if="call.call_type === 'video'" class="w-5 h-5 inline-icon" />
             <Phone v-else class="w-5 h-5 inline-icon" />
@@ -47,10 +47,13 @@
           <div>
             <div class="flex items-center gap-2">
               <h4 class="text-sm font-semibold text-mim-light-text dark:text-mim-dark-text">
-                {{ call.to_user }}
+                {{ call.is_caller ? call.to_user : (call.from_user || call.to_user) }}
               </h4>
               <span class="text-[10px] px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/5 text-mim-light-muted dark:text-mim-dark-muted font-mono uppercase">
                 {{ call.call_type === 'video' ? langStore.t('calls.video') : langStore.t('calls.audio') }}
+              </span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-mono" :class="call.is_caller ? 'text-sky-500 bg-sky-500/10' : 'text-emerald-500 bg-emerald-500/10'">
+                {{ call.is_caller ? (langStore.currentLang === 'zh' ? '呼出' : 'Outgoing') : (langStore.currentLang === 'zh' ? '呼入' : 'Incoming') }}
               </span>
             </div>
             <div class="flex items-center gap-2 text-xs text-mim-light-muted dark:text-mim-dark-muted font-mono tabular-nums">
@@ -70,7 +73,7 @@
           </span>
           <button
             @click="redial(call)"
-            class="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 text-mim-light-muted hover:text-blue-600 transition-colors"
+            class="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 text-mim-light-muted hover:text-mim-accent transition-colors"
             :title="langStore.t('calls.redial')"
           >
             <PhoneCall class="w-4 h-4 inline-icon" />
@@ -82,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { Phone, Video, PhoneCall } from 'lucide-vue-next';
 import { useChatStore } from '../stores/chat';
@@ -92,50 +95,49 @@ const router = useRouter();
 const chatStore = useChatStore();
 const langStore = useLangStore();
 
-const callLogs = ref<any[]>([
-  {
-    id: 'call_1',
-    from_user: 'Alex Chen',
-    to_user: 'Sarah Jenkins',
-    call_type: 'audio',
-    status: 'Completed',
-    duration: 184,
-    created_at: '12:15',
-  },
-  {
-    id: 'call_2',
-    from_user: 'Alex Chen',
-    to_user: 'Michael Zhang',
-    call_type: 'video',
-    status: 'Completed',
-    duration: 340,
-    created_at: 'Yesterday',
-  },
-]);
+const callLogs = ref<any[]>([]);
 
 const fetchCallHistory = async () => {
+  if (!chatStore.currentUserId || !chatStore.userToken) {
+    callLogs.value = [];
+    return;
+  }
   try {
     const res = await fetch(`/api/calls/history?user_id=${chatStore.currentUserId}`, {
       headers: { Authorization: `Bearer ${chatStore.userToken}` },
     });
     const json = await res.json();
-    if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
+    if (json.code === 0 && Array.isArray(json.data)) {
       callLogs.value = json.data;
+    } else {
+      callLogs.value = [];
     }
-  } catch (_) {}
+  } catch (_) {
+    callLogs.value = [];
+  }
 };
 
 const startQuickCall = (type: 'audio' | 'video') => {
-  const targetConv = chatStore.activeConvId || '1_2';
+  const targetConv = chatStore.activeConvId || (chatStore.conversations.length > 0 ? chatStore.conversations[0].id : '');
+  if (!targetConv) return;
   router.push(`/chats/${targetConv}`);
   chatStore.initiateWebRTCCall(type);
 };
 
 const redial = (call: any) => {
-  const targetConv = chatStore.activeConvId || '1_2';
+  const targetConv = chatStore.activeConvId || (chatStore.conversations.length > 0 ? chatStore.conversations[0].id : '');
+  if (!targetConv) return;
   router.push(`/chats/${targetConv}`);
   chatStore.initiateWebRTCCall(call.call_type === 'video' ? 'video' : 'audio');
 };
+
+watch(
+  () => chatStore.currentUserId,
+  () => {
+    fetchCallHistory();
+  },
+  { immediate: true }
+);
 
 onMounted(() => {
   fetchCallHistory();

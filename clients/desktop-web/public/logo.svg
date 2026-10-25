@@ -1,4 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="16" fill="#3B82F6"/>
-  <path d="M18 44V20L32 34L46 20V44" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#246452" />
+      <stop offset="60%" stop-color="#18483b" />
+      <stop offset="100%" stop-color="#0e2a22" />
+    </linearGradient>
+    <linearGradient id="mGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#cbe5dd" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#bgGrad)" filter="url(#shadow)" />
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="none" stroke="#ffffff" stroke-width="4" stroke-opacity="0.15" />
+
+  <!-- Shield Base Accent -->
+  <path d="M512 210 L734 290 C734 520 638 678 512 754 C386 678 290 520 290 290 Z" 
+        fill="url(#accentGrad)" 
+        fill-opacity="0.18" 
+        stroke="url(#accentGrad)" 
+        stroke-width="12" 
+        stroke-linejoin="round" />
+
+  <!-- Modern Geometric Monogram "M" -->
+  <path d="M352 640 L352 384 L456 544 L512 624 L568 544 L672 384 L672 640" 
+        fill="none" 
+        stroke="url(#mGrad)" 
+        stroke-width="64" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        filter="url(#shadow)" />
+
+  <!-- Bottom Core Security Dot -->
+  <circle cx="512" cy="714" r="16" fill="#34d399" />
 </svg>

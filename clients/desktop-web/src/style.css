@@ -744,81 +744,164 @@
    VODYANITSA THEME SPECIFIC AMBIENT & VISUAL MOTIFS
    ============================================================ */
 
-/* Deep Sea & Grand Opera Aquatic stage background pattern */
-:root[data-palette='vodyanitsa'] .vodyanitsa-stage-bg {
-  background-color: var(--mim-bg-stage);
-  background-image: 
-    radial-gradient(1px 1px at 30px 40px, rgba(56, 189, 248, 0.28), transparent),
-    radial-gradient(2px 2px at 150px 100px, rgba(2, 132, 199, 0.22), transparent),
-    radial-gradient(1.5px 1.5px at 290px 220px, rgba(234, 179, 8, 0.20), transparent),
-    radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
-  background-size: 340px 340px, 420px 420px, 380px 380px, 100% 100%;
+/* Full Window Stage Wallpaper with Aurora & Siren Wings */
+.vodyanitsa-stage-bg {
+  position: relative;
+  background-color: #060c1c;
 }
 
-.dark[data-palette='vodyanitsa'] .vodyanitsa-stage-bg,
-:root[data-theme='dark'][data-palette='vodyanitsa'] .vodyanitsa-stage-bg {
-  background-color: var(--mim-bg-stage);
-  background-image: 
-    radial-gradient(1.5px 1.5px at 45px 65px, rgba(56, 189, 248, 0.5), transparent),
-    radial-gradient(1px 1px at 190px 130px, rgba(125, 211, 252, 0.45), transparent),
-    radial-gradient(2px 2px at 330px 250px, rgba(234, 179, 8, 0.45), transparent),
-    radial-gradient(1.5px 1.5px at 95px 300px, rgba(255, 255, 255, 0.35), transparent),
-    radial-gradient(circle at 50% 10%, rgba(2, 132, 199, 0.12) 0%, transparent 70%),
-    radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.08) 0%, transparent 60%);
-  background-size: 360px 360px, 420px 420px, 500px 500px, 300px 300px, 100% 100%, 100% 100%;
+.vodyanitsa-stage-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--mim-custom-bg, url('./assets/vodyanitsa/images/vodyanitsa_stage_bg.png'));
+  background-size: cover;
+  background-position: right bottom;
+  background-repeat: no-repeat;
+  opacity: var(--mim-custom-bg-opacity, 1);
+  filter: blur(var(--mim-custom-bg-blur, 0px));
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.3s ease, filter 0.3s ease, background-image 0.3s ease;
+}
+
+/* Universal Custom Chat Background support */
+html.has-custom-bg .genshin-stage-bg,
+html.has-custom-bg .vodyanitsa-stage-bg {
+  background-color: #080f1e !important;
+}
+html.has-custom-bg .genshin-stage-bg::before,
+html.has-custom-bg .vodyanitsa-stage-bg::before {
+  content: '' !important;
+  position: absolute !important;
+  inset: 0 !important;
+  background-image: var(--mim-custom-bg) !important;
+  background-size: cover !important;
+  background-position: center bottom !important;
+  background-repeat: no-repeat !important;
+  opacity: var(--mim-custom-bg-opacity, 1) !important;
+  filter: blur(var(--mim-custom-bg-blur, 0px)) !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
 }
 
 /* Vodyanitsa Avatar Frame */
 .vodyanitsa-avatar-frame {
   border: 1.5px solid #38bdf8 !important;
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.45), inset 0 0 4px rgba(224, 242, 254, 0.35) !important;
-  border-radius: 10px !important;
+  border-radius: 12px !important;
 }
 
-/* Authentic Opera Siren Dialogue Plate System */
+/* Authentic Opera Siren Cartouche Dialogue Plate System */
 .vodyanitsa-dialogue-plate {
   position: relative;
-  min-width: 220px;
+  min-width: 60px;
   max-width: 100%;
-  border-radius: 12px;
-  overflow: hidden;
+  border-radius: 18px !important;
   transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
-  color: #f8fafc !important;
-  background-color: #0b1329 !important;
+  padding: 10px 18px !important;
+  line-height: 1.5;
 }
 
+/* Peer Cartouche: Soft Silvery-Lavender Gradient (Exact match to Mockup) */
 .vodyanitsa-dialogue-plate.vodyanitsa-plate-peer {
-  background-color: #0b1329 !important;
-  background: 
-    radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.22) 0%, transparent 65%),
-    linear-gradient(175deg, #101935 0%, #060a16 100%) !important;
-  border: 1.5px solid rgba(56, 189, 248, 0.72) !important;
-  box-shadow: 
-    inset 0 1px 1px rgba(224, 242, 254, 0.45),
-    inset 0 0 16px rgba(56, 189, 248, 0.08),
-    0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  background: linear-gradient(135deg, rgba(238, 242, 255, 0.94) 0%, rgba(212, 225, 252, 0.88) 100%) !important;
+  border: 1.5px solid rgba(186, 215, 248, 0.9) !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.95), 0 0 12px rgba(186, 215, 248, 0.4) !important;
+  color: #0f172a !important;
 }
 
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-peer::before,
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-peer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 7px;
+  height: 7px;
+  background: #eef2ff;
+  border: 1.5px solid rgba(186, 215, 248, 0.9);
+  pointer-events: none;
+}
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-peer::before {
+  left: -4.5px;
+  border-top: none;
+  border-right: none;
+}
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-peer::after {
+  right: -4.5px;
+  border-bottom: none;
+  border-left: none;
+}
+
+/* Self Cartouche: Crystal Luminous Cyan-Blue Gradient */
 .vodyanitsa-dialogue-plate.vodyanitsa-plate-self {
-  background-color: #221a14 !important;
-  background: 
-    radial-gradient(circle at 90% 0%, rgba(245, 197, 99, 0.22) 0%, transparent 60%),
-    linear-gradient(175deg, #221a14 0%, #0d0c14 100%) !important;
-  border: 1.5px solid rgba(234, 179, 8, 0.8) !important;
-  box-shadow: 
-    inset 0 1px 1px rgba(255, 240, 180, 0.45),
-    inset 0 0 16px rgba(234, 179, 8, 0.1),
-    0 4px 20px rgba(0, 0, 0, 0.5),
-    0 0 15px rgba(234, 179, 8, 0.15) !important;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.92) 0%, rgba(2, 132, 199, 0.88) 100%) !important;
+  border: 1.5px solid rgba(186, 230, 253, 0.85) !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.6), 0 0 12px rgba(56, 189, 248, 0.35) !important;
+  color: #ffffff !important;
+}
+
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-self::before,
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-self::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 7px;
+  height: 7px;
+  background: #0284c7;
+  border: 1.5px solid rgba(186, 230, 253, 0.85);
+  pointer-events: none;
+}
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-self::before {
+  left: -4.5px;
+  border-top: none;
+  border-right: none;
+}
+.vodyanitsa-dialogue-plate.vodyanitsa-plate-self::after {
+  right: -4.5px;
+  border-bottom: none;
+  border-left: none;
 }
 
 .vodyanitsa-dialogue-plate:hover {
-  border-color: rgba(56, 189, 248, 0.95) !important;
-  box-shadow: 
-    inset 0 0 0 1px rgba(56, 189, 248, 0.35),
-    inset 0 1px 2px rgba(224, 242, 254, 0.55),
-    0 6px 24px rgba(0, 0, 0, 0.55),
-    0 0 18px rgba(56, 189, 248, 0.25) !important;
+  filter: brightness(1.03);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4), 0 0 16px rgba(56, 189, 248, 0.35) !important;
+}
+
+/* Floating Frosted Opera Glass Input Deck */
+.vodyanitsa-input-deck {
+  margin: 0 16px 14px 16px;
+  background: rgba(8, 16, 36, 0.78) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1.5px solid rgba(125, 211, 252, 0.65) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55), 0 0 25px rgba(56, 189, 248, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.2) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.vodyanitsa-input-deck .corner-snowflake {
+  position: absolute;
+  font-size: 11px;
+  color: rgba(125, 211, 252, 0.8);
+  pointer-events: none;
+  user-select: none;
+  line-height: 1;
+}
+.vodyanitsa-input-deck .corner-snowflake.tl { top: 6px; left: 8px; }
+.vodyanitsa-input-deck .corner-snowflake.tr { top: 6px; right: 8px; }
+.vodyanitsa-input-deck .corner-snowflake.bl { bottom: 6px; left: 8px; }
+.vodyanitsa-input-deck .corner-snowflake.br { bottom: 6px; right: 8px; }
+
+/* Conversation List Active Glowing Item */
+.vodyanitsa-conv-active {
+  background: rgba(14, 28, 56, 0.65) !important;
+  border: 1.5px solid rgba(125, 211, 252, 0.85) !important;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.35), inset 0 0 10px rgba(56, 189, 248, 0.15) !important;
+  border-radius: 14px !important;
 }
 
 /* Opera Siren Corner Trim Brackets */

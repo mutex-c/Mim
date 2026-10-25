@@ -9,36 +9,54 @@ export default {
     extend: {
       colors: {
         mim: {
+          dock: 'var(--mim-bg-dock)',
+          list: 'var(--mim-bg-list)',
+          stage: 'var(--mim-bg-stage)',
+          card: 'var(--mim-bg-card)',
+          border: 'var(--mim-border)',
+          text: 'var(--mim-text)',
+          muted: 'var(--mim-muted)',
+          accent: 'var(--mim-accent)',
+          'accent-hover': 'var(--mim-accent-hover)',
+          'accent-subtle': 'var(--mim-accent-subtle)',
+          'accent-text': 'var(--mim-accent-text)',
+          'bubble-self': 'var(--mim-bubble-self)',
+          'bubble-self-text': 'var(--mim-bubble-self-text)',
+          'bubble-peer': 'var(--mim-bubble-peer)',
+          'bubble-peer-text': 'var(--mim-bubble-peer-text)',
+          'group-badge': 'var(--mim-group-badge)',
+          'group-badge-text': 'var(--mim-group-badge-text)',
+          hover: 'var(--mim-hover)',
           dark: {
-            dock: '#0b0b0a',
-            list: '#151515',
-            stage: '#1a1a19',
-            card: '#20201e',
-            border: '#262624',
-            text: '#e8e8e6',
-            muted: '#8e8e8a',
-            bubble: '#232321',
-            accent: '#3b82f6',
-            hover: '#1e1e1d'
+            dock: 'var(--mim-bg-dock)',
+            list: 'var(--mim-bg-list)',
+            stage: 'var(--mim-bg-stage)',
+            card: 'var(--mim-bg-card)',
+            border: 'var(--mim-border)',
+            text: 'var(--mim-text)',
+            muted: 'var(--mim-muted)',
+            bubble: 'var(--mim-bubble-peer)',
+            accent: 'var(--mim-accent)',
+            hover: 'var(--mim-hover)'
           },
           light: {
-            dock: '#f5f5f3',
-            list: '#ffffff',
-            stage: '#fcfcfb',
-            card: '#ffffff',
-            border: '#eaeae8',
-            text: '#171717',
-            muted: '#737373',
-            bubble: '#f0f0ee',
-            accent: '#2563eb',
-            hover: '#f5f5f3'
+            dock: 'var(--mim-bg-dock)',
+            list: 'var(--mim-bg-list)',
+            stage: 'var(--mim-bg-stage)',
+            card: 'var(--mim-bg-card)',
+            border: 'var(--mim-border)',
+            text: 'var(--mim-text)',
+            muted: 'var(--mim-muted)',
+            bubble: 'var(--mim-bubble-peer)',
+            accent: 'var(--mim-accent)',
+            hover: 'var(--mim-hover)'
           }
         }
       },
       boxShadow: {
-        'bite': '0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 0 3px rgba(59, 130, 246, 0.25), inset 0 1px 2px rgba(0, 0, 0, 0.2)',
-        'bite-light': '0 0 0 1px rgba(0, 0, 0, 0.06), 0 0 0 3px rgba(37, 99, 235, 0.2), inset 0 1px 2px rgba(0, 0, 0, 0.05)',
-        'card': '0 4px 20px -2px rgba(0, 0, 0, 0.25)'
+        'bite': '0 0 0 1px var(--mim-border), 0 0 0 3px var(--mim-accent-subtle), inset 0 1px 2px rgba(0, 0, 0, 0.2)',
+        'bite-light': '0 0 0 1px var(--mim-border), 0 0 0 3px var(--mim-accent-subtle), inset 0 1px 2px rgba(0, 0, 0, 0.05)',
+        'card': '0 4px 20px -2px rgba(0, 0, 0, 0.12)'
       },
       transitionTimingFunction: {
         'spring-damped': 'cubic-bezier(0.2, 0, 0, 1)',
