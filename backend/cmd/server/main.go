@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"mim/pkg/jwtx"
 	"mim/protocol"
 	"mim/service/auth"
+	"mim/service/ai"
 	"mim/service/chat"
 	"mim/service/file"
 	"mim/service/group"
@@ -33,9 +35,10 @@ import (
 )
 
 var (
-	port      = flag.Int("port", 8080, "server listen port")
-	dbPath    = flag.String("db", "mim.db", "sqlite database file path")
-	jwtSecret = "mim-enterprise-jwt-secret-key-2026"
+	port       = flag.Int("port", 8080, "server listen port")
+	dbPath     = flag.String("db", "mim.db", "sqlite database file path")
+	storageDir = flag.String("storage", "uploads", "file upload storage directory")
+	jwtSecret  = "mim-enterprise-jwt-secret-key-2026"
 	upgrader  = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // Allow cross-origin for local dev / desktop clients
@@ -53,20 +56,9 @@ type Server struct {
 	chatService  *chat.Service
 	fileService  *file.Service
 	groupService *group.Service
+	aiService    *ai.AIService
 	dfaFilter    *settings.DFAFilter
 	cfg          auth.Config
-	callLogs     []CallRecord
-	callMu       sync.RWMutex
-}
-
-type CallRecord struct {
-	ID        string `json:"id"`
-	FromUser  string `json:"from_user"`
-	ToUser    string `json:"to_user"`
-	CallType  string `json:"call_type"` // audio or video
-	Status    string `json:"status"`    // completed, missed, rejected
-	Duration  int    `json:"duration"`  // seconds
-	CreatedAt string `json:"created_at"`
 }
 
 func main() {
@@ -77,12 +69,17 @@ func main() {
 		_ = os.MkdirAll(dir, 0755)
 	}
 
-	// 1. Initialize SQLite Database
-	db, err := gorm.Open(sqlite.Open(*dbPath+"?_journal=WAL&_busy_timeout=5000"), &gorm.Config{
+	// 1. Initialize SQLite Database (WAL mode, NORMAL sync & single writer for zero lock contention)
+	db, err := gorm.Open(sqlite.Open(*dbPath+"?_journal=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=-64000"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize SQLite: %v", err)
+	}
+
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
 	}
 
 	// 2. Run Auto Migrations
@@ -101,7 +98,7 @@ func main() {
 	}
 
 	fileCfg := file.Config{
-		StorageDir: "uploads",
+		StorageDir: *storageDir,
 		SignSecret: "mim-file-sign-key-2026",
 	}
 
@@ -116,9 +113,9 @@ func main() {
 		chatService:  chat.NewService(db, hub),
 		fileService:  file.NewService(db, fileCfg),
 		groupService: group.NewService(db),
+		aiService:    ai.NewAIService(db),
 		dfaFilter:    dfa,
 		cfg:          authCfg,
-		callLogs:     make([]CallRecord, 0),
 	}
 
 	// 4. Setup Routes
@@ -131,13 +128,28 @@ func main() {
 
 	// User & Friend APIs
 	mux.HandleFunc("/api/user/profile", srv.authMiddleware(srv.handleProfile))
+	mux.HandleFunc("/api/user/update-profile", srv.authMiddleware(srv.handleUpdateProfile))
+	mux.HandleFunc("/api/user/config", srv.authMiddleware(srv.handleUpdateConfig))
+	mux.HandleFunc("/api/user/change-password", srv.authMiddleware(srv.handleChangePassword))
 	mux.HandleFunc("/api/user/friends", srv.authMiddleware(srv.handleFriends))
+	mux.HandleFunc("/api/user/delete-friend", srv.authMiddleware(srv.handleDeleteFriend))
 	mux.HandleFunc("/api/user/search", srv.authMiddleware(srv.handleSearchUser))
 	mux.HandleFunc("/api/user/add-friend", srv.authMiddleware(srv.handleAddFriend))
+	mux.HandleFunc("/api/user/friend-requests", srv.authMiddleware(srv.handleFriendRequests))
+	mux.HandleFunc("/api/user/handle-friend-request", srv.authMiddleware(srv.handleProcessFriendRequest))
 
 	// Group APIs
 	mux.HandleFunc("/api/group/create", srv.authMiddleware(srv.handleCreateGroup))
+	mux.HandleFunc("/api/group/info", srv.authMiddleware(srv.handleGroupInfo))
 	mux.HandleFunc("/api/group/members", srv.authMiddleware(srv.handleGroupMembers))
+	mux.HandleFunc("/api/group/update", srv.authMiddleware(srv.handleUpdateGroup))
+	mux.HandleFunc("/api/group/invite", srv.authMiddleware(srv.handleInviteGroup))
+	mux.HandleFunc("/api/group/mute-member", srv.authMiddleware(srv.handleMuteMember))
+	mux.HandleFunc("/api/group/kick-member", srv.authMiddleware(srv.handleKickMember))
+	mux.HandleFunc("/api/group/disband", srv.authMiddleware(srv.handleDisbandGroup))
+	mux.HandleFunc("/api/group/set-role", srv.authMiddleware(srv.handleSetGroupRole))
+	mux.HandleFunc("/api/group/transfer-owner", srv.authMiddleware(srv.handleTransferGroupOwner))
+	mux.HandleFunc("/api/group/quit", srv.authMiddleware(srv.handleQuitGroup))
 
 	// File Upload / Download APIs (SHA-256 Deduplication / 秒传)
 	mux.HandleFunc("/api/file/upload", srv.authMiddleware(srv.handleFileUpload))
@@ -151,6 +163,17 @@ func main() {
 	mux.HandleFunc("/api/chat/conversations", srv.authMiddleware(srv.handleConversations))
 	mux.HandleFunc("/api/chat/messages", srv.authMiddleware(srv.handleMessages))
 	mux.HandleFunc("/api/chat/revoke", srv.authMiddleware(srv.handleRevoke))
+	mux.HandleFunc("/api/chat/pin-conversation", srv.authMiddleware(srv.handlePinConversation))
+	mux.HandleFunc("/api/chat/mute-conversation", srv.authMiddleware(srv.handleMuteConversation))
+	mux.HandleFunc("/api/chat/read-conversation", srv.authMiddleware(srv.handleReadConversation))
+	mux.HandleFunc("/api/chat/delete-conversation", srv.authMiddleware(srv.handleDeleteConversation))
+	mux.HandleFunc("/api/chat/clear-messages", srv.authMiddleware(srv.handleClearMessages))
+	mux.HandleFunc("/api/chat/delete-message", srv.authMiddleware(srv.handleDeleteMessage))
+
+	// AI APIs
+	mux.HandleFunc("/api/ai/config", srv.authMiddleware(srv.handleAIConfig))
+	mux.HandleFunc("/api/ai/reply", srv.authMiddleware(srv.handleAIReply))
+	mux.HandleFunc("/api/ai/summary", srv.authMiddleware(srv.handleAISummary))
 
 	// WebSocket Gateway Endpoint
 	mux.HandleFunc("/ws", srv.handleWebSocket)
@@ -387,7 +410,35 @@ func seedInitialData(db *gorm.DB) {
 		},
 	}
 	db.Create(&msgs)
-	log.Printf("Seeded 4 demo users, 1 group, and initial conversations.")
+
+	// Seed Initial Call Records (Specifically for Alex Chen and Sarah Jenkins)
+	calls := []models.CallRecord{
+		{
+			CallID:     "call_init_1",
+			CallerID:   1,
+			CallerName: "Alex Chen",
+			CalleeID:   2,
+			CalleeName: "Sarah Jenkins",
+			CallType:   "audio",
+			Status:     "Completed",
+			Duration:   184,
+			CreatedAt:  now.Add(-2 * time.Hour),
+		},
+		{
+			CallID:     "call_init_2",
+			CallerID:   1,
+			CallerName: "Alex Chen",
+			CalleeID:   3,
+			CalleeName: "Michael Zhang",
+			CallType:   "video",
+			Status:     "Completed",
+			Duration:   340,
+			CreatedAt:  now.Add(-24 * time.Hour),
+		},
+	}
+	db.Create(&calls)
+
+	log.Printf("Seeded 4 demo users, 1 group, initial conversations and calls.")
 }
 
 // CORS Middleware
@@ -547,6 +598,76 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request, userID ui
 	s.jsonResponse(w, profile)
 }
 
+func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		Nickname  string `json:"nickname"`
+		Avatar    string `json:"avatar"`
+		Signature string `json:"signature"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := s.userService.UpdateProfile(userID, body.Nickname, body.Avatar, body.Signature); err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "profile_updated"})
+}
+
+func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var cfg models.UserConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := s.userService.UpdateConfig(userID, &cfg); err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "config_updated"})
+}
+
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	var u models.User
+	if err := s.db.First(&u, userID).Error; err != nil {
+		s.jsonError(w, http.StatusNotFound, "User not found")
+		return
+	}
+	if !encrypt.CheckPasswordHash(body.OldPassword, u.PasswordHash) {
+		s.jsonError(w, http.StatusBadRequest, "原密码不正确")
+		return
+	}
+	newHash, err := encrypt.HashPassword(body.NewPassword)
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
+	s.db.Model(&u).Update("password_hash", newHash)
+	s.jsonResponse(w, map[string]string{"status": "password_changed"})
+}
+
+func (s *Server) handleDeleteFriend(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		FriendID uint64 `json:"friend_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	_ = s.userService.DeleteFriend(userID, body.FriendID)
+	_ = s.userService.DeleteFriend(body.FriendID, userID)
+	s.jsonResponse(w, map[string]string{"status": "friend_deleted"})
+}
+
 func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request, userID uint64) {
 	friends, err := s.userService.GetFriendList(userID)
 	if err != nil {
@@ -590,12 +711,43 @@ func (s *Server) handleAddFriend(w http.ResponseWriter, r *http.Request, userID 
 		return
 	}
 
-	err := s.userService.SendFriendRequest(userID, body.TargetID, body.Msg)
+	isDirectFriend, err := s.userService.SendFriendRequest(userID, body.TargetID, body.Msg)
 	if err != nil {
 		s.jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.jsonResponse(w, map[string]string{"status": "request_sent"})
+	if isDirectFriend {
+		s.jsonResponse(w, map[string]interface{}{"status": "friend_added", "is_friend": true, "msg": "已成功添加为好友"})
+	} else {
+		s.jsonResponse(w, map[string]interface{}{"status": "request_sent", "is_friend": false, "msg": "好友申请已发送，等待对方通过"})
+	}
+}
+
+func (s *Server) handleFriendRequests(w http.ResponseWriter, r *http.Request, userID uint64) {
+	requests, err := s.userService.GetFriendRequests(userID)
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonResponse(w, requests)
+}
+
+func (s *Server) handleProcessFriendRequest(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		RequestID uint64 `json:"request_id"`
+		Action    int8   `json:"action"` // 2 = Agreed, 3 = Rejected
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	err := s.userService.HandleFriendRequest(body.RequestID, userID, body.Action)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]interface{}{"status": "success", "action": body.Action})
 }
 
 func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request, userID uint64) {
@@ -614,6 +766,21 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request, userI
 	s.jsonResponse(w, grp)
 }
 
+func (s *Server) handleGroupInfo(w http.ResponseWriter, r *http.Request, userID uint64) {
+	grpIDStr := r.URL.Query().Get("group_id")
+	grpID, _ := strconv.ParseUint(grpIDStr, 10, 64)
+	if grpID == 0 {
+		s.jsonError(w, http.StatusBadRequest, "group_id is required")
+		return
+	}
+	grp, err := s.groupService.GetGroupDetails(grpID)
+	if err != nil {
+		s.jsonError(w, http.StatusNotFound, "Group not found")
+		return
+	}
+	s.jsonResponse(w, grp)
+}
+
 func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request, userID uint64) {
 	grpIDStr := r.URL.Query().Get("group_id")
 	grpID, _ := strconv.ParseUint(grpIDStr, 10, 64)
@@ -627,7 +794,185 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request, user
 		s.jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.jsonResponse(w, members)
+
+	var grp models.Group
+	s.db.First(&grp, grpID)
+
+	type MemberInfo struct {
+		UserID     uint64     `json:"user_id"`
+		Account    string     `json:"account"`
+		Nickname   string     `json:"nickname"`
+		Avatar     string     `json:"avatar"`
+		Role       int8       `json:"role"`
+		MutedUntil *time.Time `json:"muted_until"`
+		IsMuted    bool       `json:"is_muted"`
+	}
+
+	res := make([]MemberInfo, 0, len(members))
+	now := time.Now()
+	for _, m := range members {
+		var u models.User
+		s.db.Select("id, account, nickname, avatar").First(&u, m.UserID)
+		isMuted := false
+		if m.Role != models.GroupRoleOwner && m.Role != models.GroupRoleAdmin {
+			if grp.IsAllMuted == 1 {
+				isMuted = true
+			} else if m.MutedUntil != nil && now.Before(*m.MutedUntil) {
+				isMuted = true
+			}
+		}
+		res = append(res, MemberInfo{
+			UserID:     m.UserID,
+			Account:    u.Account,
+			Nickname:   u.Nickname,
+			Avatar:     u.Avatar,
+			Role:       m.Role,
+			MutedUntil: m.MutedUntil,
+			IsMuted:    isMuted,
+		})
+	}
+	s.jsonResponse(w, res)
+}
+
+func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID      uint64 `json:"group_id"`
+		Title        string `json:"title"`
+		Notice       string `json:"notice"`
+		Avatar       string `json:"avatar"`
+		IsSearchable int8   `json:"is_searchable"`
+		JoinMode     int8   `json:"join_mode"`
+		IsAllMuted   int8   `json:"is_all_muted"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.UpdateGroupSettings(userID, body.GroupID, body.Title, body.Notice, body.Avatar, body.IsSearchable, body.JoinMode, body.IsAllMuted)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "updated"})
+}
+
+func (s *Server) handleInviteGroup(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID   uint64   `json:"group_id"`
+		MemberIDs []uint64 `json:"member_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.InviteMembers(userID, body.GroupID, body.MemberIDs)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "invited"})
+}
+
+func (s *Server) handleMuteMember(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID  uint64 `json:"group_id"`
+		TargetID uint64 `json:"target_id"`
+		Duration int    `json:"duration"` // duration in seconds, 0 to unmute
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.SetMemberMute(userID, body.GroupID, body.TargetID, time.Duration(body.Duration)*time.Second)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "success"})
+}
+
+func (s *Server) handleKickMember(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID  uint64 `json:"group_id"`
+		TargetID uint64 `json:"target_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.KickMember(userID, body.GroupID, body.TargetID)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "kicked"})
+}
+
+func (s *Server) handleDisbandGroup(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID uint64 `json:"group_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.DisbandGroup(userID, body.GroupID)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "disbanded"})
+}
+
+func (s *Server) handleSetGroupRole(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID  uint64 `json:"group_id"`
+		TargetID uint64 `json:"target_id"`
+		Role     int8   `json:"role"` // 2: Admin, 3: Member
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.SetMemberRole(userID, body.GroupID, body.TargetID, body.Role)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]interface{}{"status": "success", "role": body.Role})
+}
+
+func (s *Server) handleTransferGroupOwner(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID    uint64 `json:"group_id"`
+		NewOwnerID uint64 `json:"new_owner_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.TransferOwner(userID, body.GroupID, body.NewOwnerID)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "transferred"})
+}
+
+func (s *Server) handleQuitGroup(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		GroupID uint64 `json:"group_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	err := s.groupService.QuitGroup(userID, body.GroupID)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "quit"})
 }
 
 // File Upload Handler (SHA-256 Instant Upload / 秒传)
@@ -639,7 +984,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, userID
 
 	// 32MB max in memory
 	_ = r.ParseMultipartForm(32 << 20)
-	fileHeader, _, err := r.FormFile("file")
+	fileHeader, handler, err := r.FormFile("file")
 	if err != nil {
 		s.jsonError(w, http.StatusBadRequest, "Missing file parameter")
 		return
@@ -653,6 +998,9 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, userID
 	}
 
 	fileName := r.FormValue("name")
+	if fileName == "" && handler != nil && handler.Filename != "" {
+		fileName = handler.Filename
+	}
 	if fileName == "" {
 		fileName = "upload_" + strconv.FormatInt(time.Now().Unix(), 10)
 	}
@@ -663,12 +1011,18 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, userID
 		return
 	}
 
+	encodedName := url.QueryEscape(record.FileName)
+	fileUrl := fmt.Sprintf("/api/file/download?file_id=%d&name=%s", record.ID, encodedName)
 	s.jsonResponse(w, map[string]interface{}{
 		"file_id":   record.ID,
 		"file_name": record.FileName,
 		"file_size": record.FileSize,
 		"file_hash": record.FileHash,
-		"file_url":  fmt.Sprintf("/api/file/download?file_id=%d", record.ID),
+		"file_url":  fileUrl,
+		"url":       fileUrl,
+		"name":      record.FileName,
+		"size":      record.FileSize,
+		"mime":      record.FileType,
 	})
 }
 
@@ -683,32 +1037,106 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", record.FileName))
+	dlName := r.URL.Query().Get("name")
+	if dlName == "" {
+		dlName = record.FileName
+	}
+	encodedName := url.PathEscape(dlName)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"; filename*=UTF-8''%s", dlName, encodedName))
+	if record.FileType != "" {
+		w.Header().Set("Content-Type", record.FileType)
+	}
 	http.ServeFile(w, r, record.StoragePath)
 }
 
-// Call history & recording
+// Call history & recording (Strict per-user isolation: user can only see calls they participated in)
 func (s *Server) handleCallHistory(w http.ResponseWriter, r *http.Request, userID uint64) {
-	s.callMu.RLock()
-	defer s.callMu.RUnlock()
-	s.jsonResponse(w, s.callLogs)
+	var records []models.CallRecord
+	s.db.Where("caller_id = ? OR callee_id = ?", userID, userID).
+		Order("created_at DESC").
+		Limit(50).
+		Find(&records)
+
+	type CallHistoryItem struct {
+		ID        string `json:"id"`
+		FromUser  string `json:"from_user"`
+		ToUser    string `json:"to_user"`
+		CallType  string `json:"call_type"`
+		Status    string `json:"status"`
+		Duration  int    `json:"duration"`
+		CreatedAt string `json:"created_at"`
+		IsCaller  bool   `json:"is_caller"`
+	}
+
+	res := make([]CallHistoryItem, 0, len(records))
+	for _, rec := range records {
+		res = append(res, CallHistoryItem{
+			ID:        rec.CallID,
+			FromUser:  rec.CallerName,
+			ToUser:    rec.CalleeName,
+			CallType:  rec.CallType,
+			Status:    rec.Status,
+			Duration:  rec.Duration,
+			CreatedAt: rec.CreatedAt.Format("15:04"),
+			IsCaller:  rec.CallerID == userID,
+		})
+	}
+
+	s.jsonResponse(w, res)
 }
 
 func (s *Server) handleRecordCall(w http.ResponseWriter, r *http.Request, userID uint64) {
-	var rec CallRecord
-	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+	var body struct {
+		CallID     string `json:"call_id"`
+		CallerID   uint64 `json:"caller_id"`
+		CallerName string `json:"caller_name"`
+		CalleeID   uint64 `json:"callee_id"`
+		CalleeName string `json:"callee_name"`
+		CallType   string `json:"call_type"`
+		Status     string `json:"status"`
+		Duration   int    `json:"duration"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	rec.ID = "call_" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	rec.CreatedAt = time.Now().Format("15:04:05")
 
-	s.callMu.Lock()
-	s.callLogs = append([]CallRecord{rec}, s.callLogs...)
-	if len(s.callLogs) > 50 {
-		s.callLogs = s.callLogs[:50]
+	callerID := body.CallerID
+	if callerID == 0 {
+		callerID = userID
 	}
-	s.callMu.Unlock()
+	callerName := body.CallerName
+	if callerName == "" {
+		var u models.User
+		if err := s.db.First(&u, callerID).Error; err == nil {
+			callerName = u.Nickname
+		}
+	}
+	calleeName := body.CalleeName
+	if calleeName == "" && body.CalleeID > 0 {
+		var u models.User
+		if err := s.db.First(&u, body.CalleeID).Error; err == nil {
+			calleeName = u.Nickname
+		}
+	}
+
+	callID := body.CallID
+	if callID == "" {
+		callID = "call_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+
+	rec := models.CallRecord{
+		CallID:     callID,
+		CallerID:   callerID,
+		CallerName: callerName,
+		CalleeID:   body.CalleeID,
+		CalleeName: calleeName,
+		CallType:   body.CallType,
+		Status:     body.Status,
+		Duration:   body.Duration,
+		CreatedAt:  time.Now(),
+	}
+	s.db.Create(&rec)
 
 	s.jsonResponse(w, rec)
 }
@@ -766,39 +1194,477 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, userID u
 		return
 	}
 
+	// Strict permission check: user MUST be a participant of the conversation!
+	if strings.HasPrefix(convID, "group_") {
+		groupID, _ := strconv.ParseUint(strings.TrimPrefix(convID, "group_"), 10, 64)
+		var member models.GroupMember
+		if err := s.db.Where("group_id = ? AND user_id = ?", groupID, userID).First(&member).Error; err != nil {
+			s.jsonError(w, http.StatusForbidden, "Access denied: you are not a member of this group")
+			return
+		}
+	} else {
+		// Single chat: format is "minID_maxID"
+		parts := strings.Split(convID, "_")
+		if len(parts) == 2 {
+			u1, _ := strconv.ParseUint(parts[0], 10, 64)
+			u2, _ := strconv.ParseUint(parts[1], 10, 64)
+			if userID != u1 && userID != u2 {
+				s.jsonError(w, http.StatusForbidden, "Access denied: you are not a participant in this conversation")
+				return
+			}
+		}
+	}
+
 	lastSeqStr := r.URL.Query().Get("last_seq_id")
 	lastSeq, _ := strconv.ParseUint(lastSeqStr, 10, 64)
 
+	beforeSeqStr := r.URL.Query().Get("before_seq_id")
+	beforeSeq, _ := strconv.ParseUint(beforeSeqStr, 10, 64)
+
 	limitStr := r.URL.Query().Get("limit")
 	limit, _ := strconv.Atoi(limitStr)
-	if limit <= 0 {
+	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 
 	var msgs []models.Message
-	s.db.Where("conversation_id = ? AND seq_id > ?", convID, lastSeq).
-		Order("seq_id ASC").
-		Limit(limit).
-		Find(&msgs)
+	if beforeSeq > 0 {
+		// History paging: pull messages before beforeSeq (older messages)
+		var revMsgs []models.Message
+		s.db.Where("conversation_id = ? AND seq_id < ?", convID, beforeSeq).
+			Order("seq_id DESC").
+			Limit(limit).
+			Find(&revMsgs)
+		msgs = make([]models.Message, len(revMsgs))
+		for i, m := range revMsgs {
+			msgs[len(revMsgs)-1-i] = m
+		}
+	} else if lastSeq > 0 {
+		// Incremental sync: pull messages after lastSeq (newer messages)
+		s.db.Where("conversation_id = ? AND seq_id > ?", convID, lastSeq).
+			Order("seq_id ASC").
+			Limit(limit).
+			Find(&msgs)
+	} else {
+		// Initial pull: fetch latest limit messages in chronological order
+		var revMsgs []models.Message
+		s.db.Where("conversation_id = ?", convID).
+			Order("seq_id DESC").
+			Limit(limit).
+			Find(&revMsgs)
+		msgs = make([]models.Message, len(revMsgs))
+		for i, m := range revMsgs {
+			msgs[len(revMsgs)-1-i] = m
+		}
+	}
 
 	s.jsonResponse(w, msgs)
 }
 
 func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request, userID uint64) {
 	var body struct {
-		MsgID uint64 `json:"msg_id"`
+		MsgID       uint64 `json:"msg_id"`
+		ClientMsgID string `json:"client_msg_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	if err := s.chatService.RevokeMessage(userID, body.MsgID); err != nil {
+	if err := s.chatService.RevokeMessage(userID, body.MsgID, body.ClientMsgID); err != nil {
 		s.jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	s.jsonResponse(w, map[string]string{"status": "revoked"})
+}
+
+func (s *Server) handlePinConversation(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		IsPinned       int8   `json:"is_pinned"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := s.db.Model(&models.Conversation{}).
+		Where("user_id = ? AND conversation_id = ?", userID, body.ConversationID).
+		Update("is_pinned", body.IsPinned).Error; err != nil {
+		s.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]interface{}{"status": "success", "is_pinned": body.IsPinned})
+}
+
+func (s *Server) handleMuteConversation(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		IsMuted        int8   `json:"is_muted"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := s.db.Model(&models.Conversation{}).
+		Where("user_id = ? AND conversation_id = ?", userID, body.ConversationID).
+		Update("is_muted", body.IsMuted).Error; err != nil {
+		s.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]interface{}{"status": "success", "is_muted": body.IsMuted})
+}
+
+func (s *Server) handleReadConversation(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		UnreadCount    int32  `json:"unread_count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := s.db.Model(&models.Conversation{}).
+		Where("user_id = ? AND conversation_id = ?", userID, body.ConversationID).
+		Update("unread_count", body.UnreadCount).Error; err != nil {
+		s.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]interface{}{"status": "success", "unread_count": body.UnreadCount})
+}
+
+func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := s.db.Where("user_id = ? AND conversation_id = ?", userID, body.ConversationID).
+		Delete(&models.Conversation{}).Error; err != nil {
+		s.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonResponse(w, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleClearMessages(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	s.db.Where("conversation_id = ?", body.ConversationID).Delete(&models.Message{})
+	s.db.Model(&models.Conversation{}).
+		Where("conversation_id = ?", body.ConversationID).
+		Updates(map[string]interface{}{
+			"last_msg_preview": "",
+			"unread_count":     0,
+		})
+	s.jsonResponse(w, map[string]string{"status": "cleared"})
+}
+
+func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		MsgID          uint64 `json:"msg_id"`
+		ClientMsgID    string `json:"client_msg_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if body.MsgID > 0 {
+		s.db.Where("id = ? AND conversation_id = ?", body.MsgID, body.ConversationID).Delete(&models.Message{})
+	} else if body.ClientMsgID != "" {
+		s.db.Where("client_msg_id = ? AND conversation_id = ?", body.ClientMsgID, body.ConversationID).Delete(&models.Message{})
+	}
+	s.jsonResponse(w, map[string]string{"status": "deleted"})
+}
+
+// AI Config API Handler (GET to read, POST to save)
+func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method == http.MethodGet {
+		cfg, err := s.aiService.GetAIConfig(userID)
+		if err != nil {
+			s.jsonError(w, http.StatusInternalServerError, "Failed to get AI config: "+err.Error())
+			return
+		}
+		s.jsonResponse(w, cfg)
+		return
+	}
+	if r.Method == http.MethodPost {
+		var cfg ai.AIConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+		if err := s.aiService.SaveAIConfig(userID, &cfg); err != nil {
+			s.jsonError(w, http.StatusInternalServerError, "Failed to save AI config: "+err.Error())
+			return
+		}
+		s.jsonResponse(w, map[string]string{"status": "config_saved"})
+		return
+	}
+	s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+}
+
+// AI Smart Reply API Handler
+func (s *Server) handleAIReply(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		Count          int    `json:"count"`
+		Tone           string `json:"tone"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if body.ConversationID == "" {
+		s.jsonError(w, http.StatusBadRequest, "conversation_id required")
+		return
+	}
+
+	// Pull last 8 non-revoked messages
+	var rawMsgs []models.Message
+	s.db.Where("conversation_id = ? AND is_revoked = 0", body.ConversationID).
+		Order("id DESC").
+		Limit(8).
+		Find(&rawMsgs)
+
+	if len(rawMsgs) == 0 {
+		s.jsonResponse(w, map[string]interface{}{
+			"suggestions": ai.DefaultReplySuggestions,
+		})
+		return
+	}
+
+	msgs := make([]models.Message, len(rawMsgs))
+	for i, m := range rawMsgs {
+		msgs[len(rawMsgs)-1-i] = m
+	}
+
+	cfg, err := s.aiService.GetAIConfig(userID)
+	if err != nil || cfg == nil || cfg.APIKey == "" {
+		s.jsonResponse(w, map[string]interface{}{
+			"suggestions": ai.DefaultReplySuggestions,
+		})
+		return
+	}
+
+	userMap := make(map[uint64]string)
+	var contexts []ai.ChatMessageContext
+	for _, m := range msgs {
+		name, ok := userMap[m.SenderID]
+		if !ok {
+			var u models.User
+			if err := s.db.First(&u, m.SenderID).Error; err == nil && u.Nickname != "" {
+				name = u.Nickname
+			} else {
+				name = fmt.Sprintf("User_%d", m.SenderID)
+			}
+			userMap[m.SenderID] = name
+		}
+
+		content := strings.TrimSpace(m.Content)
+		if m.MsgType == models.MsgTypeImage {
+			content = "[图片文件]"
+		} else if m.MsgType == models.MsgTypeVoice {
+			content = "[语音留言]"
+		} else if m.MsgType == models.MsgTypeFile {
+			content = "[文档附件]"
+		}
+		contexts = append(contexts, ai.ChatMessageContext{
+			SenderName: name,
+			Content:    content,
+			IsMe:       m.SenderID == userID,
+		})
+	}
+
+	suggestions, err := s.aiService.CallSmartReply(*cfg, contexts)
+	if err != nil || len(suggestions) == 0 {
+		log.Printf("[AIReply] upstream AI call failed: %v, falling back", err)
+		s.jsonResponse(w, map[string]interface{}{
+			"suggestions": ai.DefaultReplySuggestions,
+		})
+		return
+	}
+
+	s.jsonResponse(w, map[string]interface{}{
+		"suggestions": suggestions,
+	})
+}
+
+// AI Summary API Handler (Upgraded with real LLM when API key configured, falling back to rule summary)
+func (s *Server) handleAISummary(w http.ResponseWriter, r *http.Request, userID uint64) {
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		Lang           string `json:"lang"`
+		Limit          int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if body.ConversationID == "" {
+		s.jsonError(w, http.StatusBadRequest, "conversation_id required")
+		return
+	}
+
+	limit := body.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	var rawMsgs []models.Message
+	s.db.Where("conversation_id = ? AND is_revoked = 0", body.ConversationID).
+		Order("id DESC").
+		Limit(limit).
+		Find(&rawMsgs)
+
+	if len(rawMsgs) == 0 {
+		emptyMsg := "当前会话暂无足够的消息记录可供智能提炼。请在会话中发送几条消息后再试。"
+		if body.Lang == "en" {
+			emptyMsg = "No sufficient conversation history available for AI synthesis. Please exchange messages before summarizing."
+		}
+		s.jsonResponse(w, map[string]interface{}{
+			"summary": emptyMsg,
+			"count":   0,
+		})
+		return
+	}
+
+	msgs := make([]models.Message, len(rawMsgs))
+	for i, m := range rawMsgs {
+		msgs[len(rawMsgs)-1-i] = m
+	}
+
+	userMap := make(map[uint64]string)
+	var lines []string
+	var contexts []ai.ChatMessageContext
+	for _, m := range msgs {
+		name, ok := userMap[m.SenderID]
+		if !ok {
+			var u models.User
+			if err := s.db.First(&u, m.SenderID).Error; err == nil && u.Nickname != "" {
+				name = u.Nickname
+			} else {
+				name = fmt.Sprintf("User_%d", m.SenderID)
+			}
+			userMap[m.SenderID] = name
+		}
+
+		content := strings.TrimSpace(m.Content)
+		if m.MsgType == models.MsgTypeImage {
+			content = "[图片文件]"
+		} else if m.MsgType == models.MsgTypeVoice {
+			content = "[语音留言]"
+		} else if m.MsgType == models.MsgTypeFile {
+			content = "[文档附件]"
+		}
+		contexts = append(contexts, ai.ChatMessageContext{
+			SenderName: name,
+			Content:    content,
+			IsMe:       m.SenderID == userID,
+		})
+
+		if len(content) > 120 {
+			content = content[:120] + "..."
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", name, content))
+	}
+
+	// Try upstream LLM summary if APIKey configured
+	aiCfg, err := s.aiService.GetAIConfig(userID)
+	if err == nil && aiCfg != nil && aiCfg.APIKey != "" {
+		aiSummary, err := s.aiService.CallSmartSummary(*aiCfg, contexts, body.Lang)
+		if err == nil && aiSummary != "" {
+			s.jsonResponse(w, map[string]interface{}{
+				"summary":       aiSummary,
+				"message_count": len(msgs),
+				"participants":  len(userMap),
+			})
+			return
+		}
+		log.Printf("[AISummary] upstream call failed: %v, falling back to rule summary", err)
+	}
+
+	// Fallback to local rule summary
+	names := make([]string, 0, len(userMap))
+	for _, n := range userMap {
+		names = append(names, n)
+	}
+
+	var summary string
+	if body.Lang == "en" {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📊 **Mim Intelligence Briefing** (Analyzed %d messages)\n", len(msgs)))
+		sb.WriteString(fmt.Sprintf("• **Key Contributors**: %s\n", strings.Join(names, ", ")))
+		sb.WriteString("• **Discussion Timeline & Core Highlights**:\n")
+		take := 5
+		if len(lines) < take {
+			take = len(lines)
+		}
+		for i := 0; i < take; i++ {
+			sb.WriteString(fmt.Sprintf("  - %s\n", lines[len(lines)-take+i]))
+		}
+		sb.WriteString("• **Synthesis & Takeaways**: Active discussion across shared threads; all data records committed to Mim monotonic cluster.")
+		summary = sb.String()
+	} else {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📊 **Mim 智能协同提炼总结**（已深度分析近 %d 条真实发言）\n", len(msgs)))
+		sb.WriteString(fmt.Sprintf("• **发言参与人员**：%s\n", strings.Join(names, "、")))
+		sb.WriteString("• **核心交流脉络提炼**：\n")
+		take := 5
+		if len(lines) < take {
+			take = len(lines)
+		}
+		for i := 0; i < take; i++ {
+			sb.WriteString(fmt.Sprintf("  - %s\n", lines[len(lines)-take+i]))
+		}
+		sb.WriteString("• **执行结论**：上下文已达成阶段性共识，关键要点与文件数据已由 Mim 统一落盘闭环。")
+		summary = sb.String()
+	}
+
+	s.jsonResponse(w, map[string]interface{}{
+		"summary":       summary,
+		"message_count": len(msgs),
+		"participants":  len(userMap),
+	})
 }
 
 // WebSocket Gateway Connection Handler
@@ -810,21 +1676,22 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		platform = "web"
 	}
 	deviceID := r.URL.Query().Get("device_id")
-	if deviceID == "" {
-		deviceID = fmt.Sprintf("dev_%d_%d", time.Now().Unix(), time.Now().Nanosecond())
-	}
 
 	if tokenStr != "" {
 		claims, err := jwtx.ParseToken(s.cfg.JwtSecret, tokenStr)
 		if err == nil {
 			userID = claims.UserID
-			if claims.Platform != "" {
+			if claims.Platform != "" && platform == "" {
 				platform = claims.Platform
 			}
-			if claims.DeviceID != "" {
+			if deviceID == "" && claims.DeviceID != "" {
 				deviceID = claims.DeviceID
 			}
 		}
+	}
+
+	if deviceID == "" {
+		deviceID = fmt.Sprintf("dev_%d_%d", time.Now().Unix(), time.Now().Nanosecond())
 	}
 
 	// Allow query param user_id for quick sandbox tests
@@ -883,6 +1750,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		for {
 			msgType, rawData, err := conn.ReadMessage()
 			if err != nil {
+				log.Printf("[WS] User %d ReadMessage error: %v", userID, err)
 				break
 			}
 
@@ -949,11 +1817,18 @@ func (s *Server) handleFrameChatMessage(client *chat.Client, frame *protocol.Fra
 	// 2. Verified Sender ID
 	chatMsg.SenderId = client.UserID
 
+	groupID := uint64(0)
+	receiverID := chatMsg.ReceiverId
+	if chatMsg.ConvType == 1 { // Group
+		groupID = chatMsg.ReceiverId
+		receiverID = 0
+	}
+
 	sendReq := &chat.SendMessageReq{
 		ClientMsgID:    chatMsg.ClientMsgId,
 		SenderID:       client.UserID,
-		ReceiverID:     chatMsg.ReceiverId,
-		GroupID:        0,
+		ReceiverID:     receiverID,
+		GroupID:        groupID,
 		ConvType:       int8(chatMsg.ConvType),
 		MsgType:        int8(chatMsg.MsgType),
 		Content:        filteredContent,
@@ -1012,27 +1887,66 @@ func (s *Server) handleFrameWebRTC(client *chat.Client, frame *protocol.Frame) {
 	signal.FromUserId = client.UserID
 
 	// Relay signal to target peer
-	payload, _ := json.Marshal(signal)
+	payload, _ := json.Marshal(&signal)
 	f := protocol.NewFrame(protocol.CmdWebRTCSignal, 0, protocol.FlagJSON, payload)
 	if encoded, err := f.Encode(); err == nil {
 		s.hub.SendToUser(signal.ToUserId, encoded)
 	}
 
-	// If HANGUP, record call history
-	if signal.SignalType == "HANGUP" {
-		s.callMu.Lock()
-		s.callLogs = append([]CallRecord{
-			{
-				ID:        signal.CallId,
-				FromUser:  fmt.Sprintf("User %d", signal.FromUserId),
-				ToUser:    fmt.Sprintf("User %d", signal.ToUserId),
-				CallType:  "Audio/Video",
-				Status:    "Completed",
-				Duration:  42,
-				CreatedAt: time.Now().Format("15:04:05"),
-			},
-		}, s.callLogs...)
-		s.callMu.Unlock()
+	// If HANGUP or REJECT, record call history into database for caller & callee
+	if signal.SignalType == "HANGUP" || signal.SignalType == "REJECT" {
+		var fromUser, toUser models.User
+		_ = s.db.First(&fromUser, signal.FromUserId)
+		_ = s.db.First(&toUser, signal.ToUserId)
+
+		fromName := fromUser.Nickname
+		if fromName == "" {
+			fromName = fmt.Sprintf("User %d", signal.FromUserId)
+		}
+		toName := toUser.Nickname
+		if toName == "" {
+			toName = fmt.Sprintf("User %d", signal.ToUserId)
+		}
+
+		callID := signal.CallId
+		if callID == "" {
+			callID = fmt.Sprintf("call_%d_%d", time.Now().Unix(), signal.FromUserId)
+		}
+
+		status := "Completed"
+		if signal.SignalType == "REJECT" {
+			status = "Rejected"
+		}
+
+		callType := "video"
+		duration := 0
+		if signal.Data != "" {
+			var d struct {
+				CallType string `json:"callType"`
+				Duration int    `json:"duration"`
+			}
+			if err := json.Unmarshal([]byte(signal.Data), &d); err == nil {
+				if d.CallType != "" {
+					callType = d.CallType
+				}
+				if d.Duration > 0 {
+					duration = d.Duration
+				}
+			}
+		}
+
+		rec := models.CallRecord{
+			CallID:     callID,
+			CallerID:   signal.FromUserId,
+			CallerName: fromName,
+			CalleeID:   signal.ToUserId,
+			CalleeName: toName,
+			CallType:   callType,
+			Status:     status,
+			Duration:   duration,
+			CreatedAt:  time.Now(),
+		}
+		s.db.Create(&rec)
 	}
 }
 
