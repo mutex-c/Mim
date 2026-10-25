@@ -308,21 +308,52 @@
                     </span>
                   </div>
 
-                  <!-- Genshin Wish Interactive Result Card -->
+                  <!-- Wish Interactive Result Card (Genshin or Vodyanitsa) -->
                   <div
                     v-else-if="isGenshinWish(msg.content)"
-                    class="genshin-wish-card p-4 space-y-3"
+                    class="p-4 space-y-3 rounded-2xl select-none"
+                    :class="parseWishData(msg.content).bannerName.includes('幽歌') || parseWishData(msg.content).summaryText.includes('沃雅妮莎')
+                      ? 'bg-gradient-to-b from-[#091736]/95 to-[#050c1f]/95 border border-[#38bdf8]/60 shadow-[0_4px_24px_rgba(56,189,248,0.25)]'
+                      : 'genshin-wish-card'"
                     @contextmenu.prevent.stop="handleMessageContextMenu($event, msg)"
                   >
-                    <div class="flex items-center justify-between border-b border-[#caa159]/30 pb-2">
+                    <div
+                      class="flex items-center justify-between pb-2 border-b"
+                      :class="parseWishData(msg.content).bannerName.includes('幽歌') || parseWishData(msg.content).summaryText.includes('沃雅妮莎')
+                        ? 'border-cyan-400/30'
+                        : 'border-[#caa159]/30'"
+                    >
                       <div class="flex items-center gap-1.5">
-                        <span class="text-amber-400 text-sm">✦</span>
-                        <span class="text-xs font-bold text-[#fef9c3]">提瓦特祈愿战报 · {{ parseWishData(msg.content).bannerName }}</span>
+                        <img
+                          v-if="parseWishData(msg.content).bannerName.includes('幽歌') || parseWishData(msg.content).summaryText.includes('沃雅妮莎')"
+                          :src="iconBtnHorn"
+                          alt=""
+                          class="w-4 h-4 object-contain inline-block shrink-0"
+                        />
+                        <span v-else class="text-amber-400 text-sm">✦</span>
+                        <span
+                          class="text-xs font-bold"
+                          :class="parseWishData(msg.content).bannerName.includes('幽歌') || parseWishData(msg.content).summaryText.includes('沃雅妮莎')
+                            ? 'text-cyan-200'
+                            : 'text-[#fef9c3]'"
+                        >
+                          {{ (parseWishData(msg.content).bannerName.includes('幽歌') || parseWishData(msg.content).summaryText.includes('沃雅妮莎')) ? '唤春角笛 · 剧院特约祈愿战报' : '提瓦特祈愿战报' }} · {{ parseWishData(msg.content).bannerName }}
+                        </span>
                       </div>
-                      <span class="text-[10px] font-mono text-amber-300">祈愿成功</span>
+                      <span
+                        class="text-[10px] font-mono"
+                        :class="parseWishData(msg.content).bannerName.includes('幽歌') || parseWishData(msg.content).summaryText.includes('沃雅妮莎')
+                          ? 'text-cyan-300'
+                          : 'text-amber-300'"
+                      >祈愿成功</span>
                     </div>
 
-                    <p class="text-xs text-amber-200 font-bold leading-relaxed">
+                    <p
+                      class="text-xs font-bold leading-relaxed"
+                      :class="parseWishData(msg.content).bannerName.includes('幽歌') || parseWishData(msg.content).summaryText.includes('沃雅妮莎')
+                        ? 'text-cyan-100'
+                        : 'text-amber-200'"
+                    >
                       {{ parseWishData(msg.content).summaryText }}
                     </p>
 
