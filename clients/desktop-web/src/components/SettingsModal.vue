@@ -99,8 +99,11 @@
             ></textarea>
           </div>
 
-          <!-- Genshin Character Persona Quick Presets -->
-          <div class="p-3.5 rounded-xl border border-amber-500/25 bg-amber-500/5 dark:bg-amber-500/10 flex flex-col gap-2.5">
+          <!-- Genshin Character Persona Quick Presets (Only in Genshin Theme) -->
+          <div
+            v-if="themeStore.currentPalette === 'genshin'"
+            class="p-3.5 rounded-xl border border-amber-500/25 bg-amber-500/5 dark:bg-amber-500/10 flex flex-col gap-2.5"
+          >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-1.5">
                 <span class="text-amber-500 font-bold text-xs genshin-gold-glow">✦</span>
