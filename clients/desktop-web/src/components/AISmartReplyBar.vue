@@ -1,12 +1,12 @@
 <template>
   <div
     v-if="visible"
-    class="rounded-xl p-3 bg-mim-light-card/95 dark:bg-mim-dark-card/95 border border-black/[0.06] dark:border-white/[0.08] shadow-sm flex flex-col gap-2.5 mb-2 backdrop-blur-md transition-all select-none"
+    class="rounded-xl p-3 bg-white/95 dark:bg-[#1a2332]/95 border border-black/[0.06] dark:border-white/[0.08] shadow-sm flex flex-col gap-2.5 mb-2 backdrop-blur-md transition-all select-none"
   >
     <!-- Top Bar Header -->
     <div class="flex items-center justify-between px-0.5">
       <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-mim-accent/10 flex items-center justify-center text-mim-accent">
+        <div class="w-6 h-6 rounded-lg bg-mim-accent-subtle flex items-center justify-center text-mim-accent">
           <Sparkles class="w-3.5 h-3.5 inline-icon" />
         </div>
         <div class="flex items-center gap-1.5">
@@ -64,6 +64,7 @@
         v-for="(suggestion, sIdx) in suggestions"
         :key="suggestion.type + '-' + sIdx"
         @click="$emit('select', suggestion.text)"
+        :aria-label="suggestion.text"
         class="ai-suggestion-card group relative flex flex-col justify-between p-3 rounded-xl bg-black/[0.02] dark:bg-white/[0.03] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-all duration-150 cursor-pointer"
         title="点击填入输入框"
       >
@@ -89,12 +90,13 @@
 
         <!-- Suggestion Text with 90ms blur-in typewriter effect -->
         <div
-          class="text-xs text-mim-light-text dark:text-mim-dark-text leading-relaxed font-normal select-text break-words"
+          class="text-xs text-mim-light-text dark:text-mim-dark-text leading-relaxed font-normal select-text break-words whitespace-pre-wrap"
           :key="suggestion.text"
         >
           <span
             v-for="(char, cIdx) in suggestion.text"
             :key="cIdx"
+            aria-hidden="true"
             class="ai-blur-char"
             :style="{ '--char-index': cIdx }"
           >{{ char === ' ' ? '\u00A0' : char }}</span>
@@ -209,6 +211,8 @@ const getFallbackLabel = (type: string) => {
 
 .ai-blur-char {
   display: inline-block;
+  will-change: filter, transform, opacity;
+  transform: translateZ(0);
   animation: aiBlurFadeIn 90ms cubic-bezier(.215, .61, .355, 1) both;
   animation-delay: calc(var(--char-index) * 30ms);
 }

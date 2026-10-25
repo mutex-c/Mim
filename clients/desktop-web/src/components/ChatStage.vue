@@ -1683,11 +1683,11 @@ const getSpeakerName = (msg: { isMe?: boolean; senderName?: string }): string =>
 };
 
 const inputContent = ref('');
-const inputText = inputContent;
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const showSmartReply = ref(false);
 const isReplying = ref(false);
 const replySuggestions = ref<SmartReplySuggestion[]>([]);
+let smartReplyAbortController: AbortController | null = null;
 const activeQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
 const displayedQuote = ref<{ msgId: string; userName: string; content: string } | null>(null);
 const copiedMsgId = ref<string | null>(null);
@@ -2320,6 +2320,13 @@ const triggerAISummary = async () => {
 // AI Smart Reply Methods
 const fetchSmartReplies = async () => {
   if (!chatStore.activeConvId || isReplying.value) return;
+
+  if (smartReplyAbortController) {
+    smartReplyAbortController.abort();
+  }
+  smartReplyAbortController = new AbortController();
+  const targetConvId = chatStore.activeConvId;
+
   isReplying.value = true;
   try {
     const res = await fetch(`/api/ai/reply?user_id=${chatStore.currentUserId}`, {
@@ -2329,17 +2336,23 @@ const fetchSmartReplies = async () => {
         Authorization: `Bearer ${chatStore.userToken}`,
       },
       body: JSON.stringify({
-        conversation_id: chatStore.activeConvId,
+        conversation_id: targetConvId,
       }),
+      signal: smartReplyAbortController.signal,
     });
     const json = await res.json();
+    if (chatStore.activeConvId !== targetConvId) return;
+
     if (json.code === 0 && json.data && json.data.suggestions) {
       replySuggestions.value = json.data.suggestions;
     }
-  } catch (err) {
+  } catch (err: any) {
+    if (err.name === 'AbortError') return;
     console.error('Failed to fetch smart replies:', err);
   } finally {
-    isReplying.value = false;
+    if (chatStore.activeConvId === targetConvId) {
+      isReplying.value = false;
+    }
   }
 };
 
@@ -2353,14 +2366,14 @@ const toggleSmartReply = async () => {
 };
 
 const onSmartReplySelect = (text: string) => {
-  inputText.value = text;
+  inputContent.value = text;
   nextTick(() => {
     textareaRef.value?.focus();
   });
 };
 
 const onSmartReplySend = (text: string) => {
-  inputText.value = text;
+  inputContent.value = text;
   handleSend();
   showSmartReply.value = false;
 };
@@ -2589,6 +2602,11 @@ const closePopupOnGlobalClick = () => {
 watch(
   () => chatStore.activeConvId,
   () => {
+    if (smartReplyAbortController) {
+      smartReplyAbortController.abort();
+      smartReplyAbortController = null;
+    }
+    isReplying.value = false;
     showSmartReply.value = false;
     replySuggestions.value = [];
     if (isGroup.value) {
