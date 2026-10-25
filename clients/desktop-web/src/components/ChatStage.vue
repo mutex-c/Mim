@@ -3,7 +3,7 @@
     @dragover.prevent="isDragging = true"
     @dragleave.prevent="isDragging = false"
     @drop.prevent="handleFileDrop"
-    class="flex-1 h-full flex bg-mim-light-stage dark:bg-mim-dark-stage genshin-stage-bg relative select-none overflow-hidden"
+    class="flex-1 h-full flex bg-mim-light-stage dark:bg-mim-dark-stage relative select-none overflow-hidden"
   >
     <!-- Hidden File Inputs -->
     <input type="file" ref="imageInputRef" @change="handleImageSelected" accept="image/*" class="hidden" />
@@ -855,9 +855,9 @@
               </button>
 
               <!-- Genshin Quotes & Stickers Drawer Button -->
-              <div class="relative" v-if="themeStore.currentPalette !== 'vodyanitsa'">
+              <div class="relative" v-if="themeStore.currentPalette === 'genshin'">
                 <button
-                  @click="showGenshinStickers = !showGenshinStickers; showVodyanitsaStickers = false; if (themeStore.currentPalette === 'genshin') playGenshinClick();"
+                  @click="showGenshinStickers = !showGenshinStickers; showVodyanitsaStickers = false; playGenshinClick();"
                   :disabled="isMutedInGroup"
                   class="px-2 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer border-0"
                   :class="showGenshinStickers
@@ -876,9 +876,9 @@
                 />
               </div>
 
-              <!-- Genshin Wish Button (Non-Vodyanitsa) -->
+              <!-- Genshin Wish Button -->
               <button
-                v-if="themeStore.currentPalette !== 'vodyanitsa'"
+                v-if="themeStore.currentPalette === 'genshin'"
                 @click="showWishModal = true; playPrimogemSparkle()"
                 :disabled="isMutedInGroup"
                 class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-all disabled:opacity-40 cursor-pointer bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-purple-500/15 text-amber-600 dark:text-amber-300 font-bold hover:shadow-xs border-0"
