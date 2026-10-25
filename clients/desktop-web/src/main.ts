@@ -15,10 +15,9 @@ window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response>
     return originalFetch(new URL(resolveApiUrl(input.toString())), init);
   }
   if (input instanceof Request) {
-    const resolved = resolveApiUrl(input.url);
-    if (resolved !== input.url) {
-      const newReq = new Request(resolved, input);
-      return originalFetch(newReq, init);
+    const targetUrl = resolveApiUrl(input.url);
+    if (targetUrl !== input.url) {
+      return originalFetch(targetUrl, init || input);
     }
   }
   return originalFetch(input, init);

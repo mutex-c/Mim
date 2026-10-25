@@ -11,8 +11,10 @@ export const isTauriEnv = (): boolean => {
   return (
     '__TAURI_INTERNALS__' in window ||
     '__TAURI__' in window ||
+    '__TAURI_METADATA__' in window ||
     window.location.hostname === 'tauri.localhost' ||
-    window.location.protocol === 'tauri:'
+    window.location.protocol === 'tauri:' ||
+    ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && !window.location.port)
   );
 };
 
@@ -22,11 +24,11 @@ export const getServerHost = (): string => {
     if (saved) return saved.trim();
   }
   // In Tauri Desktop, default to backend 127.0.0.1:8080
-  if (isTauriEnv()) {
+  if (isTauriEnv() || (typeof window !== 'undefined' && (window.location.hostname === 'tauri.localhost' || window.location.protocol === 'tauri:'))) {
     return '127.0.0.1:8080';
   }
   // In Browser
-  return window.location.host;
+  return typeof window !== 'undefined' ? window.location.host : '127.0.0.1:8080';
 };
 
 export const setServerHost = (host: string): void => {
@@ -40,10 +42,17 @@ export const setServerHost = (host: string): void => {
 };
 
 export const getApiBaseUrl = (): string => {
-  // If in web browser dev or behind reverse proxy, relative path works
-  if (!isTauriEnv() && window.location.hostname !== 'tauri.localhost' && window.location.protocol !== 'tauri:') {
+  if (typeof window === 'undefined') return 'http://127.0.0.1:8080';
+
+  // Web dev server with proxy (port 3000): keep relative so Vite proxy handles it
+  if (window.location.port === '3000' && !isTauriEnv()) {
     return '';
   }
+  // Direct backend serving (port 8080): relative works
+  if (window.location.port === '8080') {
+    return '';
+  }
+
   const host = getServerHost();
   if (host.startsWith('127.0.0.1') || host.startsWith('localhost') || host.includes(':8080')) {
     return `http://${host}`;
@@ -54,10 +63,14 @@ export const getApiBaseUrl = (): string => {
 
 export const getWsUrl = (userId: number | string, token: string, deviceId: string): string => {
   let host = getServerHost();
-  if (!isTauriEnv()) {
+  if (!isTauriEnv() && window.location.hostname !== 'tauri.localhost') {
     host = (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')
       ? `${window.location.hostname}:8080`
       : window.location.host;
+  }
+
+  if (host.includes('tauri.localhost') || !host || host === 'localhost') {
+    host = '127.0.0.1:8080';
   }
 
   const proto = (host.startsWith('127.0.0.1') || host.startsWith('localhost') || host.includes(':8080'))
@@ -71,9 +84,19 @@ export const getWsUrl = (userId: number | string, token: string, deviceId: strin
  */
 export const resolveApiUrl = (path: string): string => {
   if (!path) return '';
+
+  // 1. Strip scheme and host if it was expanded against tauri.localhost or localhost without port
   if (path.startsWith('http://tauri.localhost') || path.startsWith('https://tauri.localhost')) {
-    path = path.replace(/^https?:\/\/tauri\.localhost/, '');
+    path = path.replace(/^https?:\/\/tauri\.localhost(:[0-9]+)?/, '');
   }
+  if (path.startsWith('http://localhost/') || path.startsWith('http://127.0.0.1/')) {
+    path = path.replace(/^http:\/\/(localhost|127\.0\.0\.1)/, '');
+  }
+  if (path.startsWith('tauri://localhost')) {
+    path = path.replace(/^tauri:\/\/localhost/, '');
+  }
+
+  // 2. If it's already an external / absolute URL (including 127.0.0.1:8080, blob:, data:), preserve it
   if (
     path.startsWith('http://') ||
     path.startsWith('https://') ||
@@ -82,6 +105,8 @@ export const resolveApiUrl = (path: string): string => {
   ) {
     return path;
   }
+
+  // 3. Resolve relative URL against API base
   const base = getApiBaseUrl();
   if (!base) return path;
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
