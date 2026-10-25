@@ -89,6 +89,18 @@
             <Palette v-else class="w-4 h-4 inline-icon" />
           </button>
 
+          <!-- AI Summary Header Button -->
+          <button
+            @click="openSummaryDrawer"
+            class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
+            :class="showSummaryDrawer
+              ? 'bg-mim-accent-subtle text-mim-accent'
+              : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text'"
+            :title="langStore.t('chat.aiSummary') || '会话智能纪要'"
+          >
+            <Sparkles class="w-4 h-4 inline-icon" />
+          </button>
+
           <button
             @click="startCall('audio')"
             class="w-9 h-9 rounded-lg flex items-center justify-center text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-mim-light-text dark:hover:text-mim-dark-text transition-colors"
@@ -778,11 +790,13 @@
               </button>
               <button
                 @click="triggerAISummary"
-                :disabled="isSummarizing || isMutedInGroup"
+                :disabled="isMutedInGroup"
                 class="px-2.5 h-8 rounded-lg flex items-center gap-1 text-xs transition-colors font-medium cursor-pointer disabled:opacity-50"
-                :class="themeStore.currentPalette === 'vodyanitsa'
-                  ? 'bg-cyan-950/40 border border-cyan-400/40 text-cyan-200 hover:border-cyan-300 hover:bg-cyan-900/50'
-                  : 'text-mim-accent hover:bg-mim-accent-subtle'"
+                :class="showSummaryDrawer
+                  ? 'bg-mim-accent text-white'
+                  : (themeStore.currentPalette === 'vodyanitsa'
+                    ? 'bg-cyan-950/40 border border-cyan-400/40 text-cyan-200 hover:border-cyan-300 hover:bg-cyan-900/50'
+                    : 'text-mim-accent hover:bg-mim-accent-subtle')"
                 :title="langStore.t('chat.aiSummary')"
               >
                 <Loader2 v-if="isSummarizing" class="w-3.5 h-3.5 inline-icon animate-spin" />
@@ -1448,11 +1462,24 @@
       v-if="showBgModal"
       @close="showBgModal = false"
     />
+
+    <!-- AI Summary Drawer (Structured Meeting/Chat Minutes) -->
+    <AISummaryDrawer
+      :visible="showSummaryDrawer"
+      :loading="isSummarizing"
+      :summary="summaryData.summary"
+      :message-count="summaryData.messageCount"
+      :participants="summaryData.participants"
+      :conversation-title="chatStore.activeConversation?.title || ''"
+      @close="showSummaryDrawer = false"
+      @refresh="fetchAISummary(true)"
+      @send="onSendSummaryToChat"
+    />
   </main>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted, onUnmounted, toRaw } from 'vue';
+import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted, toRaw } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   Phone,
@@ -1512,6 +1539,7 @@ import GenshinWishModal from './GenshinWishModal.vue';
 import VodyanitsaStickerPicker from './VodyanitsaStickerPicker.vue';
 import CustomBgModal from './CustomBgModal.vue';
 import AISmartReplyBar, { type SmartReplySuggestion } from './AISmartReplyBar.vue';
+import AISummaryDrawer from './AISummaryDrawer.vue';
 import { useThemeStore } from '../stores/theme';
 import type { GenshinSticker } from '../assets/genshin/stickers';
 import { CHIBI_STICKERS, type ChibiSticker } from '../assets/genshin/chibiStickers';
@@ -1704,6 +1732,13 @@ const isDragging = ref(false);
 const isRecording = ref(false);
 const recordingSeconds = ref(0);
 const isSummarizing = ref(false);
+const showSummaryDrawer = ref(false);
+const summaryData = reactive({
+  summary: '',
+  messageCount: 0,
+  participants: 0,
+});
+let summaryAbortController: AbortController | null = null;
 const playingVoiceId = ref<string | null>(null);
 const lightboxImage = ref<string | null>(null);
 const isCallMinimized = ref(false);
@@ -1810,8 +1845,18 @@ watch(() => chatStore.activeCall, (val) => {
   }
 });
 
-// Auto-minimize call when switching to another conversation
+// Reset AI summary drawer and auto-minimize call when switching to another conversation
 watch(() => chatStore.activeConvId, (newConvId) => {
+  if (summaryAbortController) {
+    summaryAbortController.abort();
+    summaryAbortController = null;
+  }
+  showSummaryDrawer.value = false;
+  isSummarizing.value = false;
+  summaryData.summary = '';
+  summaryData.messageCount = 0;
+  summaryData.participants = 0;
+
   if (chatStore.activeCall) {
     if (newConvId !== chatStore.activeCall.convId) {
       isCallMinimized.value = true;
@@ -2268,10 +2313,20 @@ const playVoice = (msgId: string) => {
   }
 };
 
-// Real AI Summary Generation (Dynamic from /api/ai/summary)
-const triggerAISummary = async () => {
-  if (!chatStore.activeConvId || isSummarizing.value) return;
+// AI Structured Summary Drawer & Service
+const fetchAISummary = async (forceRefresh = false) => {
+  if (!chatStore.activeConvId) return;
+
+  if (summaryAbortController) {
+    summaryAbortController.abort();
+  }
+  summaryAbortController = new AbortController();
+  const signal = summaryAbortController.signal;
+
   isSummarizing.value = true;
+  if (forceRefresh) {
+    summaryData.summary = '';
+  }
 
   try {
     const res = await fetch(`/api/ai/summary?user_id=${chatStore.currentUserId}`, {
@@ -2283,38 +2338,49 @@ const triggerAISummary = async () => {
       body: JSON.stringify({
         conversation_id: chatStore.activeConvId,
         lang: langStore.currentLang,
+        limit: 50,
       }),
+      signal,
     });
+
+    if (signal.aborted) return;
+
     const json = await res.json();
-    if (json.code === 0 && json.data) {
-      const summaryText = json.data.summary;
-      const list = chatStore.activeMessages;
-      const nextSeq = list.length > 0 ? list[list.length - 1].seqId + 1 : 1;
-
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-
-      const aiMsg: MessageItem = {
-        id: 'ai_' + Date.now(),
-        clientMsgId: 'c_ai_' + Date.now(),
-        seqId: nextSeq,
-        senderId: 0,
-        senderName: langStore.t('chat.aiCopilot'),
-        content: summaryText,
-        msgType: 'ai_summary',
-        time: timeStr,
-        isMe: false,
-        status: 'read',
-      };
-
-      list.push(aiMsg);
-      scrollToBottom();
-    }
-  } catch (err) {
-    console.error('AI summary error:', err);
+    const data = json.data || json;
+    summaryData.summary = data.summary || '';
+    summaryData.messageCount = data.message_count || data.count || 0;
+    summaryData.participants = data.participants || 0;
+  } catch (err: any) {
+    if (err.name === 'AbortError') return;
+    console.error('Fetch AI summary error:', err);
   } finally {
-    isSummarizing.value = false;
+    if (!signal.aborted) {
+      isSummarizing.value = false;
+    }
   }
+};
+
+const openSummaryDrawer = () => {
+  showSummaryDrawer.value = !showSummaryDrawer.value;
+  if (showSummaryDrawer.value) {
+    if (!summaryData.summary && !isSummarizing.value) {
+      fetchAISummary();
+    }
+  }
+};
+
+const triggerAISummary = () => {
+  showSummaryDrawer.value = true;
+  if (!summaryData.summary && !isSummarizing.value) {
+    fetchAISummary();
+  }
+};
+
+const onSendSummaryToChat = (summaryText: string) => {
+  if (!summaryText.trim()) return;
+  chatStore.sendMessage(summaryText);
+  showSummaryDrawer.value = false;
+  scrollToBottom();
 };
 
 // AI Smart Reply Methods
@@ -2617,15 +2683,21 @@ watch(
   { immediate: true }
 );
 
-const handleSmartReplyEsc = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && showSmartReply.value) {
-    showSmartReply.value = false;
+const handleEscKey = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') {
+    if (showSummaryDrawer.value) {
+      showSummaryDrawer.value = false;
+      return;
+    }
+    if (showSmartReply.value) {
+      showSmartReply.value = false;
+    }
   }
 };
 
 onMounted(() => {
   window.addEventListener('click', closePopupOnGlobalClick);
-  window.addEventListener('keydown', handleSmartReplyEsc);
+  window.addEventListener('keydown', handleEscKey);
   if (isGroup.value) {
     refreshGroupData();
   }
@@ -2633,6 +2705,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('click', closePopupOnGlobalClick);
-  window.removeEventListener('keydown', handleSmartReplyEsc);
+  window.removeEventListener('keydown', handleEscKey);
 });
 </script>
