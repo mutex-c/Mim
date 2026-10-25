@@ -377,3 +377,52 @@ func (s *AIService) CallSmartSummary(ctx context.Context, cfg AIConfig, contexts
 
 	return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
 }
+
+// TestConnection probes upstream OpenAI-compatible /chat/completions and returns latency in milliseconds
+func (s *AIService) TestConnection(ctx context.Context, baseURL, apiKey, model string) (int64, error) {
+	if baseURL == "" {
+		return 0, errors.New("base_url is required")
+	}
+	if model == "" {
+		model = "deepseek-chat"
+	}
+	endpoint := resolveChatEndpoint(baseURL)
+
+	reqBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": "hi"},
+		},
+		"max_tokens": 1,
+	}
+
+	reqBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(reqBytes))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	start := time.Now()
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	latencyMs := time.Since(start).Milliseconds()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return latencyMs, fmt.Errorf("upstream HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	return latencyMs, nil
+}

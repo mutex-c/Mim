@@ -303,3 +303,37 @@ func TestAIService_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestAIService_TestConnection(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer valid-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"hello"}}]}`))
+	}))
+	defer mockServer.Close()
+
+	svc := NewAIService(nil)
+
+	// 1. Success test
+	latency, err := svc.TestConnection(context.Background(), mockServer.URL, "valid-key", "gpt-4o-mini")
+	if err != nil {
+		t.Fatalf("expected test connection to succeed, got %v", err)
+	}
+	if latency < 0 {
+		t.Errorf("expected non-negative latency, got %d", latency)
+	}
+
+	// 2. Auth failure test
+	_, err = svc.TestConnection(context.Background(), mockServer.URL, "bad-key", "gpt-4o-mini")
+	if err == nil {
+		t.Fatal("expected test connection to fail with bad key, got nil")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected 401 in error message, got %v", err)
+	}
+}
+

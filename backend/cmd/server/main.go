@@ -172,6 +172,7 @@ func main() {
 
 	// AI APIs
 	mux.HandleFunc("/api/ai/config", srv.authMiddleware(srv.handleAIConfig))
+	mux.HandleFunc("/api/ai/test", srv.authMiddleware(srv.handleAITest))
 	mux.HandleFunc("/api/ai/reply", srv.authMiddleware(srv.handleAIReply))
 	mux.HandleFunc("/api/ai/summary", srv.authMiddleware(srv.handleAISummary))
 
@@ -1434,6 +1435,37 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request, userID u
 		return
 	}
 	s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+}
+
+// AI Test Connection API Handler (POST to test upstream connectivity without saving)
+func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request, userID uint64) {
+	if r.Method != http.MethodPost {
+		s.jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var body struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+		Model   string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.BaseURL) == "" {
+		s.jsonError(w, http.StatusBadRequest, "base_url is required")
+		return
+	}
+
+	latencyMs, err := s.aiService.TestConnection(r.Context(), body.BaseURL, body.APIKey, body.Model)
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, "Connection test failed: "+err.Error())
+		return
+	}
+
+	s.jsonResponse(w, map[string]interface{}{
+		"latency_ms": latencyMs,
+	})
 }
 
 // AI Smart Reply API Handler

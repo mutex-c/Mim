@@ -202,30 +202,69 @@ export const useChatStore = defineStore('chat', () => {
 
     const startTime = performance.now();
 
-    // 1. Direct endpoint test (works seamlessly in Tauri Desktop and local Ollama)
-    try {
-      let endpoint = targetConfig.base_url.replace(/\/+$/, '');
-      if (!endpoint.endsWith('/chat/completions')) {
-        endpoint = `${endpoint}/chat/completions`;
-      }
-
+    // 1. Primary path: Call backend proxy /api/ai/test (idempotent, no DB mutation, bypasses browser CORS)
+    if (currentUserId.value && userToken.value) {
+      const testUrl = resolveApiUrl(`/api/ai/test?user_id=${currentUserId.value}`);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
+      try {
+        const testRes = await fetch(testUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${userToken.value}`,
+          },
+          body: JSON.stringify({
+            base_url: targetConfig.base_url,
+            api_key: targetConfig.api_key,
+            model: targetConfig.model || 'deepseek-chat',
+          }),
+          signal: controller.signal,
+        });
+
+        const data = await testRes.json().catch(() => null);
+        if (testRes.ok && data?.code === 0) {
+          const latencyMs = typeof data.data?.latency_ms === 'number'
+            ? data.data.latency_ms
+            : Math.round(performance.now() - startTime);
+          return { success: true, latencyMs };
+        } else {
+          return { success: false, error: data?.msg || `测试失败 (HTTP ${testRes.status})` };
+        }
+      } catch (backendErr: any) {
+        if (backendErr.name === 'AbortError') {
+          return { success: false, error: '请求超时 (超过 12 秒)' };
+        }
+        // If backend unreachable or network error, proceed to direct endpoint fallback
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    // 2. Direct endpoint test fallback (e.g. for offline local Ollama or Tauri Desktop)
+    let endpoint = targetConfig.base_url.replace(/\/+$/, '');
+    if (!endpoint.endsWith('/chat/completions')) {
+      endpoint = `${endpoint}/chat/completions`;
+    }
+
+    const directController = new AbortController();
+    const directTimeoutId = setTimeout(() => directController.abort(), 8000);
+
+    try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${targetConfig.api_key}`,
+          ...(targetConfig.api_key ? { Authorization: `Bearer ${targetConfig.api_key}` } : {}),
         },
         body: JSON.stringify({
           model: targetConfig.model || 'deepseek-chat',
-          messages: [{ role: 'user', content: 'Ping' }],
-          max_tokens: 5,
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 1,
         }),
-        signal: controller.signal,
+        signal: directController.signal,
       });
-      clearTimeout(timeoutId);
 
       const latencyMs = Math.round(performance.now() - startTime);
 
@@ -239,43 +278,13 @@ export const useChatStore = defineStore('chat', () => {
         return { success: false, latencyMs, error: '端点不存在或模型名称错误 (404)' };
       }
       const errText = await res.text().catch(() => '');
-      if (res.status === 400 && errText.toLowerCase().includes('model')) {
-        return { success: true, latencyMs };
-      }
       return { success: false, latencyMs, error: `HTTP ${res.status}: ${errText.slice(0, 100)}` };
     } catch (directErr: any) {
-      // 2. If direct fetch fails (e.g. browser CORS for public APIs), fallback to backend proxy test
-      if (currentUserId.value && userToken.value) {
-        try {
-          await saveAIConfig(targetConfig);
-          const convId = activeConvId.value || (conversations.value[0]?.id || '');
-          if (convId) {
-            const replyUrl = resolveApiUrl(`/api/ai/reply?user_id=${currentUserId.value}`);
-            const replyRes = await fetch(replyUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${userToken.value}`,
-              },
-              body: JSON.stringify({
-                conversation_id: convId,
-                count: 1,
-              }),
-            });
-            const latencyMs = Math.round(performance.now() - startTime);
-            if (replyRes.ok) {
-              const data = await replyRes.json();
-              if (data.code === 0) {
-                return { success: true, latencyMs };
-              }
-            }
-          }
-        } catch (_) {}
-      }
-
       const latencyMs = Math.round(performance.now() - startTime);
       const msg = directErr.name === 'AbortError' ? '请求超时 (超过 8 秒)' : (directErr.message || '网络连接失败');
       return { success: false, latencyMs, error: msg };
+    } finally {
+      clearTimeout(directTimeoutId);
     }
   };
 

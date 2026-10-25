@@ -411,7 +411,7 @@
                   <span class="text-xs font-semibold text-mim-light-text dark:text-mim-dark-text group-hover:text-mim-accent transition-colors">
                     {{ preset.name }}
                   </span>
-                  <span v-if="preset.badge" class="text-[9px] px-1.5 py-0.2 rounded bg-mim-accent-subtle text-mim-accent font-medium">
+                  <span v-if="preset.badge" class="text-[9px] px-1.5 py-0.5 rounded bg-mim-accent-subtle text-mim-accent font-medium">
                     {{ preset.badge }}
                   </span>
                 </div>
@@ -452,6 +452,8 @@
                 <input
                   v-model="aiForm.api_key"
                   :type="showApiKey ? 'text' : 'password'"
+                  autocomplete="off"
+                  spellcheck="false"
                   :placeholder="aiForm.provider === 'ollama' ? '本地运行无需 API Key (可选)' : 'sk-********************************'"
                   class="mim-input w-full h-8 pl-3 pr-9 rounded-lg bg-black/5 dark:bg-white/5 text-xs text-mim-light-text dark:text-mim-dark-text border border-black/10 dark:border-white/10 focus:border-mim-accent focus:shadow-[inset_0_0_0_1.5px_var(--mim-accent)] font-mono"
                 />
