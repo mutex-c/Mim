@@ -17,8 +17,6 @@ import cryImg from './images/vodyanitsa_cry.png';
 import poutImg from './images/vodyanitsa_pout.png';
 import awesomeImg from './images/vodyanitsa_awesome.png';
 import sleepImg from './images/vodyanitsa_sleep.png';
-import singImg from './images/vodyanitsa_sing.png';
-import teaImg from './images/vodyanitsa_tea.png';
 
 export interface VodyanitsaSticker {
   id: string;
@@ -130,22 +128,6 @@ export const VODYANITSA_STICKERS: VodyanitsaSticker[] = [
     caption: '「困了……水妖也是需要冬眠的嘛……」',
     imageSrc: sleepImg,
     svgDataUri: sleepImg,
-  },
-  {
-    id: 'vodyanitsa_sing',
-    name: '沃雅妮莎·高歌咏叹',
-    character: '沃雅妮莎',
-    caption: '「水波与音符，在此刻共鸣……」',
-    imageSrc: singImg,
-    svgDataUri: singImg,
-  },
-  {
-    id: 'vodyanitsa_tea',
-    name: '沃雅妮莎·剧院红茶',
-    character: '沃雅妮莎',
-    caption: '「演出前，一杯热红茶是不可或缺的。」',
-    imageSrc: teaImg,
-    svgDataUri: teaImg,
   },
 ];
 
