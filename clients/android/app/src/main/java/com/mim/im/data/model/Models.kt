@@ -330,3 +330,53 @@ data class CallSessionState(
     val isConnected: Boolean = false,
     val durationSeconds: Int = 0
 )
+
+// --- User Profile & Configuration DTOs ---
+
+data class UpdateProfileReq(
+    val nickname: String,
+    val avatar: String = "",
+    val signature: String = ""
+)
+
+data class UpdateConfigReq(
+    @SerializedName("search_by_account") val searchByAccount: Int = 1,
+    @SerializedName("search_by_nickname") val searchByNickname: Int = 1,
+    @SerializedName("friend_verify_mode") val friendVerifyMode: Int = 2
+)
+
+// --- AI Configuration & Smart Reply DTOs ---
+
+data class AIConfigDto(
+    @SerializedName("provider") val provider: String = "deepseek",
+    @SerializedName("base_url") val baseUrl: String = "",
+    @SerializedName("api_key") val apiKey: String = "",
+    @SerializedName("model") val model: String = "",
+    @SerializedName("is_custom") val isCustom: Boolean = false
+)
+
+data class AITestReq(
+    @SerializedName("base_url") val baseUrl: String,
+    @SerializedName("api_key") val apiKey: String,
+    @SerializedName("model") val model: String
+)
+
+data class AITestResp(
+    @SerializedName("latency_ms") val latencyMs: Long = 0
+)
+
+data class AIReplyReq(
+    @SerializedName("conversation_id") val conversationId: String,
+    @SerializedName("count") val count: Int = 3
+)
+
+data class AIReplyItem(
+    @SerializedName("type") val type: String = "general",
+    @SerializedName("text") val text: String = "",
+    @SerializedName("label") val label: String? = null
+)
+
+data class AIReplyResp(
+    @SerializedName("suggestions") val suggestions: List<AIReplyItem> = emptyList()
+)
+

@@ -97,6 +97,24 @@ interface ApiService {
     @POST("/api/group/quit")
     suspend fun quitGroup(@Body req: GroupIdReq): Response<ApiResponse<Map<String, Any>>>
 
+    @POST("/api/user/update-profile")
+    suspend fun updateProfile(@Body req: UpdateProfileReq): Response<ApiResponse<Map<String, Any>>>
+
+    @POST("/api/user/config")
+    suspend fun updateConfig(@Body req: UpdateConfigReq): Response<ApiResponse<Map<String, Any>>>
+
+    @GET("/api/ai/config")
+    suspend fun getAIConfig(): Response<ApiResponse<AIConfigDto>>
+
+    @POST("/api/ai/config")
+    suspend fun saveAIConfig(@Body req: AIConfigDto): Response<ApiResponse<Map<String, Any>>>
+
+    @POST("/api/ai/test")
+    suspend fun testAIConfig(@Body req: AITestReq): Response<ApiResponse<AITestResp>>
+
+    @POST("/api/ai/reply")
+    suspend fun getAIReply(@Body req: AIReplyReq): Response<ApiResponse<AIReplyResp>>
+
     @POST("/api/ai/summary")
     suspend fun getAISummary(@Body req: AISummaryReq): Response<ApiResponse<AISummaryResp>>
 

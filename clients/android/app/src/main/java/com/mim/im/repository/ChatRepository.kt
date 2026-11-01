@@ -1086,4 +1086,91 @@ class ChatRepository(
             Result.failure(e)
         }
     }
+
+    suspend fun getAIReply(conversationId: String, count: Int = 3): Result<List<AIReplyItem>> {
+        return try {
+            val resp = apiClient.service.getAIReply(AIReplyReq(conversationId, count))
+            if (resp.isSuccessful && resp.body()?.code == 0 && resp.body()?.data != null) {
+                Result.success(resp.body()!!.data!!.suggestions)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "获取智能回复失败"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getAIConfig(): Result<AIConfigDto> {
+        return try {
+            val resp = apiClient.service.getAIConfig()
+            if (resp.isSuccessful && resp.body()?.code == 0 && resp.body()?.data != null) {
+                Result.success(resp.body()!!.data!!)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "获取 AI 配置失败"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveAIConfig(config: AIConfigDto): Result<Boolean> {
+        return try {
+            val resp = apiClient.service.saveAIConfig(config)
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(true)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "保存 AI 配置失败"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun testAIConfig(config: AIConfigDto): Result<Long> {
+        return try {
+            val resp = apiClient.service.testAIConfig(
+                AITestReq(
+                    baseUrl = config.baseUrl,
+                    apiKey = config.apiKey,
+                    model = config.model
+                )
+            )
+            if (resp.isSuccessful && resp.body()?.code == 0 && resp.body()?.data != null) {
+                Result.success(resp.body()!!.data!!.latencyMs)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "测试连接失败"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateProfile(nickname: String, signature: String, avatar: String): Result<Boolean> {
+        return try {
+            val resp = apiClient.service.updateProfile(UpdateProfileReq(nickname, avatar, signature))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(true)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "更新个人资料失败"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateConfig(searchMode: Int, needConfirm: Boolean): Result<Boolean> {
+        return try {
+            val searchByAcc = if (searchMode >= 1) 1 else 0
+            val searchByNick = if (searchMode >= 2) 1 else 0
+            val verifyMode = if (needConfirm) 2 else 1
+            val resp = apiClient.service.updateConfig(UpdateConfigReq(searchByAcc, searchByNick, verifyMode))
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(true)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "更新配置失败"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

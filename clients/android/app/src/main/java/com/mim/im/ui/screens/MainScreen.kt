@@ -396,7 +396,8 @@ fun MainScreen(
                 2 -> SettingsScreen(
                     prefs = prefs,
                     wsManager = wsManager,
-                    onLogout = onLogout
+                    onLogout = onLogout,
+                    chatRepo = chatRepo
                 )
             }
         }

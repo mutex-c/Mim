@@ -39,6 +39,7 @@ import androidx.core.content.FileProvider
 import android.util.Log
 import coil.compose.AsyncImage
 import com.mim.im.data.local.MessageEntity
+import com.mim.im.data.model.AIReplyItem
 import com.mim.im.data.model.ConvType
 import com.mim.im.data.model.GroupInfoDto
 import com.mim.im.data.model.GroupMemberDto
@@ -88,6 +89,31 @@ fun ChatScreen(
     var isGeneratingSummary by remember { mutableStateOf(false) }
     var aiSummaryText by remember { mutableStateOf("") }
     var aiSummaryCount by remember { mutableIntStateOf(0) }
+
+    var smartReplies by remember { mutableStateOf<List<AIReplyItem>>(emptyList()) }
+    var isLoadingSmartReplies by remember { mutableStateOf(false) }
+    var showSmartReplies by remember { mutableStateOf(true) }
+
+    val myId = chatRepo.currentOwnerId
+
+    fun fetchSmartReplies() {
+        if (conversationId.isBlank()) return
+        isLoadingSmartReplies = true
+        scope.launch {
+            val res = chatRepo.getAIReply(conversationId)
+            isLoadingSmartReplies = false
+            if (res.isSuccess) {
+                smartReplies = res.getOrDefault(emptyList())
+            }
+        }
+    }
+
+    LaunchedEffect(conversationId, messages.size) {
+        val lastMsg = messages.lastOrNull()
+        if (lastMsg != null && lastMsg.senderId != myId) {
+            fetchSmartReplies()
+        }
+    }
 
     fun triggerAISummary() {
         showAISummarySheet = true
@@ -327,12 +353,36 @@ fun ChatScreen(
                         }
                     }
                 } else {
-                    Surface(
-                        color = MimTheme.colors.surfaceElevated,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(0.5.dp, MimTheme.colors.border, RoundedCornerShape(0.dp))
-                    ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // AI Smart Reply Bar
+                        if (showSmartReplies && (smartReplies.isNotEmpty() || isLoadingSmartReplies) && inputText.isEmpty()) {
+                            AISmartReplyBar(
+                                suggestions = smartReplies,
+                                isLoading = isLoadingSmartReplies,
+                                onSelect = { selectedText ->
+                                    inputText = selectedText
+                                },
+                                onSend = { sendText ->
+                                    scope.launch {
+                                        chatRepo.sendTextMessage(
+                                            conversationId = conversationId,
+                                            convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
+                                            targetId = targetId,
+                                            text = sendText
+                                        )
+                                    }
+                                },
+                                onRefresh = { fetchSmartReplies() },
+                                onDismiss = { showSmartReplies = false }
+                            )
+                        }
+
+                        Surface(
+                            color = MimTheme.colors.surfaceElevated,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(0.5.dp, MimTheme.colors.border, RoundedCornerShape(0.dp))
+                        ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -444,6 +494,7 @@ fun ChatScreen(
                         }
                     }
                 }
+                }
 
                 // Attachment Drawer
                 if (showAttachmentSheet) {
@@ -496,7 +547,6 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(messages, key = { it.msgId }) { msg ->
-                val myId = chatRepo.currentOwnerId
                 val isSelf = msg.senderId == myId
 
                 MessageBubbleItem(
@@ -824,14 +874,32 @@ fun MessageBubbleItem(
                                     )
                                     "failed" -> Icon(
                                         Icons.Default.Error,
-                                        contentDescription = "失败",
+                                        contentDescription = "发送失败",
                                         tint = Color(0xFFEF4444),
                                         modifier = Modifier.size(12.dp)
                                     )
-                                    else -> Icon(
+                                    "sent" -> Icon(
                                         Icons.Default.Done,
+                                        contentDescription = "已发送",
+                                        tint = MimTheme.colors.bubbleSelfText.copy(alpha = 0.65f),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    "delivered" -> Icon(
+                                        Icons.Default.DoneAll,
                                         contentDescription = "已送达",
                                         tint = MimTheme.colors.bubbleSelfText.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    "read" -> Icon(
+                                        Icons.Default.DoneAll,
+                                        contentDescription = "已读",
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    else -> Icon(
+                                        Icons.Default.Done,
+                                        contentDescription = "已发送",
+                                        tint = MimTheme.colors.bubbleSelfText.copy(alpha = 0.65f),
                                         modifier = Modifier.size(12.dp)
                                     )
                                 }

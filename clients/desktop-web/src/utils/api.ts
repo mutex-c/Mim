@@ -63,7 +63,8 @@ export const getWsUrl = (userId: number | string, token: string, deviceId: strin
   }
 
   const proto = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
-  return `${proto}//${host}/ws?user_id=${userId}&token=${encodeURIComponent(token)}&platform=desktop&device_id=${encodeURIComponent(deviceId)}`;
+  const platform = isTauriEnv() ? 'desktop' : 'web';
+  return `${proto}//${host}/ws?token=${encodeURIComponent(token)}&platform=${platform}&device_id=${encodeURIComponent(deviceId)}`;
 };
 
 /**
