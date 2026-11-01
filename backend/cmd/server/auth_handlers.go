@@ -80,7 +80,7 @@ func (s *Server) handleDemoUsers(w http.ResponseWriter, r *http.Request) {
 	var users []models.User
 	// Restrict strictly to predefined demo seed accounts; never expose real registered users
 	s.db.Select("id, account, nickname, avatar, role").
-		Where("account IN (?)", []string{"alex", "bob", "carol", "david"}).
+		Where("account IN (?)", []string{"alex", "sarah", "michael", "david"}).
 		Find(&users)
 
 	type DemoUserItem struct {
