@@ -36,8 +36,9 @@ var (
 	redisPass    = flag.String("redis-pass", "redis", "redis password")
 	kafkaBrokers = flag.String("kafka-brokers", "127.0.0.1:9092", "comma-separated Kafka brokers (optional)")
 	etcdAddr     = flag.String("etcd-addr", "127.0.0.1:2379", "etcd host:port (leave empty for standalone)")
-	nodeID       = flag.String("node-id", "logic-1", "service instance node id")
-	jwtSecret    = flag.String("jwt-secret", "mim-enterprise-jwt-secret-key-2026", "jwt secret")
+	nodeID        = flag.String("node-id", "logic-1", "service instance node id")
+	jwtSecret     = flag.String("jwt-secret", "mim-enterprise-jwt-secret-key-2026", "jwt secret")
+	advertiseAddr = flag.String("advertise-addr", "", "logic address advertised to etcd (default: 127.0.0.1:grpcPort)")
 )
 
 func main() {
@@ -47,7 +48,15 @@ func main() {
 		*jwtSecret = envSecret
 	}
 
-	log.Printf("[Logic] Starting Mim Logic Cluster Service [%s] on port %d...", *nodeID, *grpcPort)
+	logicAddr := *advertiseAddr
+	if envAdv := os.Getenv("MIM_ADVERTISE_ADDR"); envAdv != "" && logicAddr == "" {
+		logicAddr = envAdv
+	}
+	if logicAddr == "" {
+		logicAddr = fmt.Sprintf("127.0.0.1:%d", *grpcPort)
+	}
+
+	log.Printf("[Logic] Starting Mim Logic Cluster Service [%s] on port %d (advertise: %s)...", *nodeID, *grpcPort, logicAddr)
 
 	// 1. Initialize Database (SQLite WAL or MySQL 8)
 	db, err := database.InitDB(database.Config{
@@ -106,7 +115,7 @@ func main() {
 	rpcMgr := rpcfw.NewManager()
 	defer rpcMgr.Close()
 
-	clusterPusher := transfer.NewClusterPusher(producer, rpcMgr, gwDisc, "127.0.0.1:9092", rdb)
+	clusterPusher := transfer.NewClusterPusher(producer, rpcMgr, gwDisc, "", rdb)
 	chatSvc := chat.NewService(db, clusterPusher, rdb)
 	authSvc := auth.NewService(db, auth.Config{
 		JwtSecret:     *jwtSecret,
@@ -129,9 +138,7 @@ func main() {
 	// 7. Register with Etcd (if configured)
 	var registrar *discovery.Registrar
 	if etcdClient != nil {
-		localIP := "127.0.0.1"
-		regAddr := fmt.Sprintf("%s:%d", localIP, *grpcPort)
-		reg, err := discovery.NewRegistrar(etcdClient, "logic", *nodeID, regAddr, 5)
+		reg, err := discovery.NewRegistrar(etcdClient, "logic", *nodeID, logicAddr, 5)
 		if err == nil {
 			registrar = reg
 		} else {

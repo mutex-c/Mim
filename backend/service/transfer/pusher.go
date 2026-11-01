@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"mim/pkg/discovery"
@@ -32,9 +33,6 @@ func NewClusterPusher(
 	defaultGw string,
 	rdb *redisx.Client,
 ) *ClusterPusher {
-	if defaultGw == "" {
-		defaultGw = "127.0.0.1:9092"
-	}
 	return &ClusterPusher{
 		producer:    producer,
 		rpcMgr:      rpcMgr,
@@ -141,10 +139,15 @@ func (p *ClusterPusher) directGRPCPush(userID uint64, excludeDeviceID string, da
 	for _, addr := range targetAddrs {
 		gwCli, err := p.rpcMgr.GetGatewayClient(addr)
 		if err != nil {
+			log.Printf("[ClusterPusher Warning] Failed to get gateway client for %s: %v", addr, err)
 			continue
 		}
 		resp, err := gwCli.PushMessage(ctx, req)
-		if err == nil && resp != nil && resp.Delivered {
+		if err != nil {
+			log.Printf("[ClusterPusher Warning] PushMessage to gateway %s failed: %v", addr, err)
+			continue
+		}
+		if resp != nil && resp.Delivered {
 			deliveredAny = true
 		}
 	}

@@ -98,9 +98,11 @@ func (s *TransferService) DispatchPush(ctx context.Context, task *PushTask) erro
 		if s.gatewayDisc != nil {
 			targetAddrs = s.gatewayDisc.GetAllEndpoints()
 		}
-		if len(targetAddrs) == 0 {
-			targetAddrs = []string{"127.0.0.1:9092"}
-		}
+	}
+
+	if len(targetAddrs) == 0 {
+		log.Printf("[Transfer Warning] No active gateway found for user %d, skipping push", task.TargetUserID)
+		return nil
 	}
 
 	req := &protocol.GatewayPushReq{
@@ -113,11 +115,16 @@ func (s *TransferService) DispatchPush(ctx context.Context, task *PushTask) erro
 	for _, addr := range targetAddrs {
 		gwCli, err := s.rpcMgr.GetGatewayClient(addr)
 		if err != nil {
+			log.Printf("[Transfer Warning] Failed to get gateway client for %s: %v", addr, err)
 			continue
 		}
 
 		resp, err := gwCli.PushMessage(ctx, req)
-		if err == nil && resp.Delivered {
+		if err != nil {
+			log.Printf("[Transfer Warning] PushMessage to gateway %s failed: %v", addr, err)
+			continue
+		}
+		if resp != nil && resp.Delivered {
 			// Successfully pushed to user on this gateway
 			break
 		}

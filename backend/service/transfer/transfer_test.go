@@ -99,3 +99,64 @@ func TestTransferServicePushPipeline(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestClusterPusherDirectRouting(t *testing.T) {
+	// 1. Setup mock gateway
+	hub := chat.NewHub(nil)
+	gwLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen gw: %v", err)
+	}
+	gwGrpc := grpc.NewServer()
+	gwServer := rpcgw.NewServer(hub)
+	protocol.RegisterGatewayServiceServer(gwGrpc, gwServer)
+	go func() {
+		_ = gwGrpc.Serve(gwLis)
+	}()
+	defer gwGrpc.Stop()
+
+	gwAddr := gwLis.Addr().String()
+
+	// 2. Register mock client
+	targetUID := uint64(7777)
+	mockClient := chat.NewClient(targetUID, "ios", "iphone_dev", nil, hub)
+	hub.Register(mockClient)
+
+	// 3. Setup Discovery
+	reg, _ := discovery.NewRegistrar(nil, "gateway", "gw-node-direct", gwAddr, 5)
+	defer reg.Close()
+
+	disc, err := discovery.NewDiscovery(nil, "gateway")
+	if err != nil {
+		t.Fatalf("NewDiscovery failed: %v", err)
+	}
+	defer disc.Close()
+
+	rpcMgr := rpcfw.NewManager()
+	defer rpcMgr.Close()
+
+	// ClusterPusher with no producer (forces direct gRPC push) and empty defaultGw
+	pusher := transfer.NewClusterPusher(nil, rpcMgr, disc, "", nil)
+
+	// WebRTC signal frame
+	webrtcFrame := []byte{0x4D, 0x49, 0x01, 0x00, 0x05, 0x01, 0xAA, 0xBB}
+	delivered := pusher.SendToUser(targetUID, webrtcFrame)
+	if !delivered {
+		t.Errorf("expected delivered to be true")
+	}
+
+	select {
+	case data := <-mockClient.SendChan:
+		if len(data) != len(webrtcFrame) {
+			t.Errorf("received frame size mismatch: got %d, want %d", len(data), len(webrtcFrame))
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("timeout waiting for direct gRPC pushed frame")
+	}
+
+	// Test unroutable/offline user
+	offlineDelivered := pusher.SendToUser(9999999, webrtcFrame)
+	if offlineDelivered {
+		t.Errorf("expected delivered to be false for offline user")
+	}
+}

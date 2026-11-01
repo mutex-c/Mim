@@ -36,8 +36,9 @@ var (
 	redisAddr = flag.String("redis-addr", "127.0.0.1:6379", "redis host:port")
 	redisPass = flag.String("redis-pass", "redis", "redis password")
 	etcdAddr  = flag.String("etcd-addr", "127.0.0.1:2379", "etcd host:port (optional)")
-	nodeID    = flag.String("node-id", "gateway-1", "gateway instance node id")
-	jwtSecret = flag.String("jwt-secret", "mim-enterprise-jwt-secret-key-2026", "jwt secret for edge auth")
+	nodeID        = flag.String("node-id", "gateway-1", "gateway instance node id")
+	jwtSecret     = flag.String("jwt-secret", "mim-enterprise-jwt-secret-key-2026", "jwt secret for edge auth")
+	advertiseAddr = flag.String("advertise-addr", "", "gateway address advertised to etcd & Redis (default: 127.0.0.1:grpcPort)")
 )
 
 var upgrader = websocket.Upgrader{
@@ -62,7 +63,15 @@ func main() {
 		*jwtSecret = envSecret
 	}
 
-	log.Printf("[Gateway] Starting Mim Long-Connection Gateway [%s]...", *nodeID)
+	gwAddr := *advertiseAddr
+	if envAdv := os.Getenv("MIM_ADVERTISE_ADDR"); envAdv != "" && gwAddr == "" {
+		gwAddr = envAdv
+	}
+	if gwAddr == "" {
+		gwAddr = fmt.Sprintf("127.0.0.1:%d", *grpcPort)
+	}
+
+	log.Printf("[Gateway] Starting Mim Long-Connection Gateway [%s] (advertise: %s)...", *nodeID, gwAddr)
 
 	// 1. Connect Redis (for multi-device routing & distributed kickout)
 	rdb, err := redisx.NewClient(redisx.Config{
@@ -77,7 +86,7 @@ func main() {
 	}
 
 	hub := chat.NewHub(rdb)
-	hub.SetGatewayAddr(fmt.Sprintf("127.0.0.1:%d", *grpcPort))
+	hub.SetGatewayAddr(gwAddr)
 	rpcMgr := rpcfw.NewManager()
 
 	// 2. Setup Etcd Discovery for Logic Services
@@ -123,7 +132,6 @@ func main() {
 	// 4. Register Gateway to Etcd
 	var registrar *discovery.Registrar
 	if etcdClient != nil {
-		gwAddr := fmt.Sprintf("127.0.0.1:%d", *grpcPort)
 		reg, err := discovery.NewRegistrar(etcdClient, "gateway", *nodeID, gwAddr, 5)
 		if err == nil {
 			registrar = reg

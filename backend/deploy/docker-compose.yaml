@@ -33,7 +33,7 @@ services:
       dockerfile: Dockerfile
     container_name: mim-logic
     restart: "no"
-    command: ["./mim-logic", "-port", "9091", "-redis-addr", "redis:6379", "-redis-pass", "${REDIS_PASSWORD:-mim_redis_pass_2026}", "-etcd-addr", "etcd:2379", "-kafka-brokers", "kafka:29092"]
+    command: ["./mim-logic", "-port", "9091", "-redis-addr", "redis:6379", "-redis-pass", "${REDIS_PASSWORD:-mim_redis_pass_2026}", "-etcd-addr", "etcd:2379", "-kafka-brokers", "kafka:29092", "-advertise-addr", "logic:9091"]
     ports:
       - "9091:9091"
     volumes:
@@ -57,10 +57,9 @@ services:
       dockerfile: Dockerfile
     container_name: mim-gateway
     restart: "no"
-    command: ["./mim-gateway", "-port", "8081", "-grpc-port", "9092", "-logic-addr", "logic:9091", "-redis-addr", "redis:6379", "-redis-pass", "${REDIS_PASSWORD:-mim_redis_pass_2026}", "-etcd-addr", "etcd:2379"]
+    command: ["./mim-gateway", "-port", "8081", "-grpc-port", "9092", "-logic-addr", "logic:9091", "-redis-addr", "redis:6379", "-redis-pass", "${REDIS_PASSWORD:-mim_redis_pass_2026}", "-etcd-addr", "etcd:2379", "-advertise-addr", "gateway:9092"]
     ports:
       - "8081:8081"
-      - "9092:9092"
     depends_on:
       - logic
       - redis
