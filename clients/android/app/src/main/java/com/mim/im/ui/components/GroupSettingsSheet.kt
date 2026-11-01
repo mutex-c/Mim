@@ -78,9 +78,11 @@ fun GroupSettingsSheet(
     val isOwner = myRole == 1
     val isAdmin = myRole == 2
     val isOwnerOrAdmin = isOwner || isAdmin
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = MimTheme.colors.surfaceElevated,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {

@@ -38,12 +38,12 @@
 
       <!-- Search Bar (Rule 2: Bite Feel Input) -->
       <div class="relative w-full">
-        <Search class="w-4 h-4 absolute left-3 top-2.5 text-mim-light-muted dark:text-mim-dark-muted pointer-events-none inline-icon" />
+        <Search class="w-4 h-4 absolute left-3 top-2.5 text-mim-light-muted dark:text-mim-dark-muted pointer-events-none inline-icon transition-colors duration-150" />
         <input
           v-model="searchKeyword"
           type="text"
           :placeholder="langStore.t('conv.searchPlaceholder')"
-          class="mim-input w-full h-9 pl-9 pr-3 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] text-sm text-mim-light-text dark:text-mim-dark-text placeholder-mim-light-muted dark:placeholder-mim-dark-muted border-none"
+          class="mim-input w-full h-9 pl-9 pr-3 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] text-sm text-mim-light-text dark:text-mim-dark-text placeholder-mim-light-muted dark:placeholder-mim-dark-muted border-none transition-[background-color,box-shadow] duration-150 focus:bg-black/[0.06] dark:focus:bg-white/[0.08]"
         />
       </div>
     </div>
@@ -55,18 +55,20 @@
         :key="conv.id"
         @click="selectConv(conv.id)"
         @contextmenu.prevent.stop="onConvContextMenu($event, conv)"
-        class="w-full p-2.5 rounded-xl flex items-center gap-3 cursor-pointer transition-all duration-150 relative"
+        class="w-full p-2.5 rounded-xl flex items-center gap-3 cursor-pointer transition-[background-color,box-shadow,transform] duration-150 ease-out active:scale-[0.985] relative"
         :class="chatStore.activeConvId === conv.id
           ? (themeStore.currentPalette === 'vodyanitsa'
               ? 'vodyanitsa-conv-active'
               : (themeStore.currentPalette === 'genshin' ? 'bg-amber-500/10 dark:bg-amber-500/15 ring-1 ring-amber-500/35 shadow-xs' : 'bg-black/[0.06] dark:bg-white/[0.08] shadow-sm ring-1 ring-black/10 dark:ring-white/10'))
           : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'"
       >
-        <!-- Active indicator bar -->
+        <!-- Active indicator bar with spring scale & opacity -->
         <span
-          v-if="chatStore.activeConvId === conv.id"
-          class="absolute left-1 top-3.5 bottom-3.5 w-1 rounded-full"
-          :class="themeStore.currentPalette === 'vodyanitsa' ? 'bg-cyan-400 shadow-[0_0_8px_#38bdf8]' : 'bg-mim-accent'"
+          class="absolute left-1 top-3.5 bottom-3.5 w-1 rounded-full transition-[opacity,transform] duration-200 cubic-bezier(0.16, 1, 0.3, 1)"
+          :class="[
+            chatStore.activeConvId === conv.id ? 'opacity-100 scale-y-100' : 'opacity-0 scale-y-50 pointer-events-none',
+            themeStore.currentPalette === 'vodyanitsa' ? 'bg-cyan-400 shadow-[0_0_8px_#38bdf8]' : 'bg-mim-accent'
+          ]"
         ></span>
 
         <!-- Avatar with Status Ring -->
@@ -133,7 +135,9 @@
       </div>
     </div>
     <!-- New Chat Modal -->
-    <NewChatModal v-if="showNewChatModal" @close="showNewChatModal = false" />
+    <Transition name="conv-modal">
+      <NewChatModal v-if="showNewChatModal" @close="showNewChatModal = false" />
+    </Transition>
 
     <!-- Draggable Resize Handle on the Right Border (规范 5) -->
     <div
@@ -362,3 +366,37 @@ const filteredConversations = computed(() => {
   return [...list].sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0));
 });
 </script>
+
+<style scoped>
+/* Modal Transition (overlays/dialog spec) */
+.conv-modal-enter-active {
+  transition: opacity 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.conv-modal-leave-active {
+  transition: opacity 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.conv-modal-enter-active :deep(> div) {
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.conv-modal-leave-active :deep(> div) {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.conv-modal-enter-from {
+  opacity: 0;
+}
+.conv-modal-enter-from :deep(> div) {
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+}
+
+.conv-modal-leave-to {
+  opacity: 0;
+}
+.conv-modal-leave-to :deep(> div) {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+}
+</style>

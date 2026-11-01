@@ -1,6 +1,6 @@
 <template>
   <div
-    class="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-start justify-center pt-24 px-4 select-none animate-in fade-in duration-150"
+    class="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-start justify-center pt-24 px-4 select-none"
     @click.self="$emit('close')"
   >
     <div

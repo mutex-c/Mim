@@ -1,6 +1,7 @@
 package com.mim.im.repository
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import com.google.gson.Gson
 import com.mim.im.api.ApiClient
@@ -13,6 +14,9 @@ import com.mim.im.data.model.*
 import com.mim.im.network.WsManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -20,6 +24,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.FileOutputStream
+import java.net.URLEncoder
 import java.util.UUID
 
 class ChatRepository(
@@ -28,7 +33,8 @@ class ChatRepository(
     private val apiClient: ApiClient,
     private val wsManager: WsManager,
     private val messageDao: MessageDao,
-    private val conversationDao: ConversationDao
+    private val conversationDao: ConversationDao,
+    val webRtcManager: com.mim.im.webrtc.WebRtcManager? = null
 ) {
     companion object {
         private const val TAG = "ChatRepository"
@@ -39,6 +45,27 @@ class ChatRepository(
 
     val currentOwnerId: String
         get() = prefs.currentUser?.id?.toString() ?: "0"
+
+    fun resolveMediaUrl(url: String?): String {
+        if (url.isNullOrBlank()) return ""
+        if (url.startsWith("http://") || url.startsWith("https://")) return url
+        val cleanBase = prefs.serverUrl.trimEnd('/')
+        val cleanPath = if (url.startsWith("/")) url else "/$url"
+        return "$cleanBase$cleanPath"
+    }
+
+    // --- WebRTC Audio & Video Call State ---
+    private val _activeCall = MutableStateFlow<CallSessionState?>(null)
+    val activeCall: StateFlow<CallSessionState?> = _activeCall.asStateFlow()
+
+    private val _incomingCall = MutableStateFlow<CallSessionState?>(null)
+    val incomingCall: StateFlow<CallSessionState?> = _incomingCall.asStateFlow()
+
+    private val _isPeerCameraOff = MutableStateFlow(false)
+    val isPeerCameraOff: StateFlow<Boolean> = _isPeerCameraOff.asStateFlow()
+
+    private var pendingIncomingOffer: WebRTCSignalDto? = null
+    private var callTimerJob: Job? = null
 
     init {
         observeWsEvents()
@@ -65,6 +92,22 @@ class ChatRepository(
                 handleRevoke(revokeMsg)
             }
         }
+
+        // 4. Observe WebRTC Signals
+        scope.launch {
+            wsManager.webRtcSignals.collect { signal ->
+                handleWebRTCSignal(signal)
+            }
+        }
+
+        // 5. Observe connection status to refresh conversations on connect/reconnect
+        scope.launch {
+            wsManager.status.collect { status ->
+                if (status == com.mim.im.network.WsStatus.CONNECTED) {
+                    refreshConversations()
+                }
+            }
+        }
     }
 
     private suspend fun handleIncomingMessage(wsMsg: WsChatMessage) {
@@ -74,17 +117,48 @@ class ChatRepository(
         var mediaUrl: String? = null
 
         if (wsMsg.msgType == MsgType.FILE || wsMsg.msgType == MsgType.IMAGE || wsMsg.msgType == MsgType.VOICE) {
-            try {
-                val meta = gson.fromJson(wsMsg.content, FileContentMeta::class.java)
-                fileName = meta.name
-                fileSize = meta.size
-                mediaUrl = meta.url
-            } catch (_: Exception) {}
+            val raw = wsMsg.content.trim()
+            if (raw.startsWith("{")) {
+                try {
+                    val meta = gson.fromJson(raw, FileContentMeta::class.java)
+                    fileName = meta.name
+                    fileSize = meta.size
+                    mediaUrl = meta.url
+                } catch (_: Exception) {}
+            }
+            if (mediaUrl.isNullOrEmpty() && (raw.startsWith("/") || raw.startsWith("http"))) {
+                mediaUrl = raw
+                try {
+                    val uri = Uri.parse(raw)
+                    val qName = uri.getQueryParameter("name")
+                    if (!qName.isNullOrBlank() && fileName.isNullOrBlank()) {
+                        fileName = Uri.decode(qName)
+                    }
+                    val qSize = uri.getQueryParameter("size")
+                    if (!qSize.isNullOrBlank() && fileSize == 0L) {
+                        fileSize = parseFileSize(qSize)
+                    }
+                } catch (_: Exception) {}
+            }
+            if (fileName.isNullOrBlank()) {
+                fileName = when (wsMsg.msgType) {
+                    MsgType.IMAGE -> "image.jpg"
+                    MsgType.VOICE -> "voice.mp4"
+                    else -> "file"
+                }
+            }
         }
+
+        val targetMsgId = if (wsMsg.msgId > 0) wsMsg.msgId.toString() else wsMsg.clientMsgId
+        val existing = messageDao.getMessageById(ownerId, targetMsgId)
+            ?: (if (wsMsg.clientMsgId.isNotEmpty()) messageDao.getMessageById(ownerId, wsMsg.clientMsgId) else null)
+
+        val localFilePath = existing?.localFilePath
+        val isDownloaded = existing?.isDownloaded ?: (!localFilePath.isNullOrEmpty() && File(localFilePath).exists())
 
         val msgEntity = MessageEntity(
             accountOwnerId = ownerId,
-            msgId = if (wsMsg.msgId > 0) wsMsg.msgId.toString() else wsMsg.clientMsgId,
+            msgId = targetMsgId,
             conversationId = wsMsg.conversationId,
             senderId = wsMsg.senderId.toString(),
             receiverId = wsMsg.receiverId.toString(),
@@ -100,12 +174,17 @@ class ChatRepository(
             quotedMsgId = if (wsMsg.quotedMsgId > 0) wsMsg.quotedMsgId.toString() else "",
             quotedContent = wsMsg.quotedContent,
             mediaUrl = mediaUrl,
-            fileName = fileName,
-            fileSize = fileSize,
+            fileName = fileName ?: existing?.fileName,
+            fileSize = if (fileSize > 0) fileSize else (existing?.fileSize ?: 0L),
+            localFilePath = localFilePath,
+            isDownloaded = isDownloaded,
             seq = wsMsg.seqId,
             status = "sent",
             timestamp = wsMsg.sendTime
         )
+        if (wsMsg.clientMsgId.isNotEmpty() && wsMsg.msgId > 0 && wsMsg.clientMsgId != wsMsg.msgId.toString()) {
+            messageDao.deleteMessage(ownerId, wsMsg.clientMsgId)
+        }
         messageDao.insertOrUpdate(msgEntity)
 
         // Update conversation summary
@@ -136,16 +215,223 @@ class ChatRepository(
 
     private suspend fun handleMessageAck(ack: WsMessageAck) {
         val ownerId = currentOwnerId
-        if (ack.code == 0) {
-            messageDao.updateStatus(ownerId, ack.clientMsgId, "sent")
-        } else {
-            messageDao.updateStatus(ownerId, ack.clientMsgId, "failed")
+        Log.d(TAG, "handleMessageAck: clientMsgId=${ack.clientMsgId}, code=${ack.code}, msgId=${ack.msgId}, seq=${ack.seqId}")
+        if (ack.clientMsgId.isNotEmpty()) {
+            if (ack.code == 0) {
+                messageDao.updateStatus(ownerId, ack.clientMsgId, "sent")
+            } else {
+                messageDao.updateStatus(ownerId, ack.clientMsgId, "failed")
+            }
         }
     }
 
     private suspend fun handleRevoke(revokeMsg: WsChatMessage) {
         val ownerId = currentOwnerId
         messageDao.markAsRevoked(ownerId, revokeMsg.msgId.toString())
+    }
+
+    private suspend fun handleWebRTCSignal(signal: WebRTCSignalDto) {
+        val currentUserId = currentOwnerId.toLongOrNull() ?: 0L
+        if (signal.toUserId != currentUserId && signal.toUserId != 0L) return
+
+        when (signal.signalType.uppercase()) {
+            "OFFER" -> {
+                pendingIncomingOffer = signal
+                val isVideo = signal.data.contains("\"callType\":\"video\"") || signal.data.contains("video")
+                val callerName = try {
+                    val friends = apiClient.service.getFriends().body()?.data
+                    friends?.find { it.id == signal.fromUserId }?.displayName ?: "用户 ${signal.fromUserId}"
+                } catch (_: Exception) {
+                    "用户 ${signal.fromUserId}"
+                }
+
+                _incomingCall.value = CallSessionState(
+                    callId = signal.callId,
+                    peerId = signal.fromUserId,
+                    peerName = callerName,
+                    isVideo = isVideo,
+                    isOutgoing = false,
+                    isConnected = false,
+                    durationSeconds = 0
+                )
+            }
+            "ANSWER" -> {
+                val current = _activeCall.value
+                if (current != null && current.callId == signal.callId) {
+                    _activeCall.value = current.copy(isConnected = true)
+                    startCallTimer()
+                    webRtcManager?.handleAnswer(signal)
+                }
+            }
+            "CANDIDATE" -> {
+                webRtcManager?.handleCandidate(signal)
+            }
+            "CAMERA_STATE" -> {
+                try {
+                    val json = org.json.JSONObject(signal.data)
+                    val isMuted = json.optBoolean("isVideoMuted", false)
+                    _isPeerCameraOff.value = isMuted
+                } catch (_: Exception) {}
+            }
+            "REJECT", "HANGUP" -> {
+                if (_incomingCall.value?.callId == signal.callId) {
+                    _incomingCall.value = null
+                }
+                if (_activeCall.value?.callId == signal.callId) {
+                    stopCallTimer()
+                    _activeCall.value = null
+                }
+                _isPeerCameraOff.value = false
+                webRtcManager?.endCall()
+                pendingIncomingOffer = null
+            }
+        }
+    }
+
+    fun initiateCall(targetId: Long, targetName: String, isVideo: Boolean) {
+        val callId = "call_" + System.currentTimeMillis()
+        val currentUserId = currentOwnerId.toLongOrNull() ?: 0L
+
+        _isPeerCameraOff.value = false
+        _activeCall.value = CallSessionState(
+            callId = callId,
+            peerId = targetId,
+            peerName = targetName,
+            isVideo = isVideo,
+            isOutgoing = true,
+            isConnected = false,
+            durationSeconds = 0
+        )
+
+        webRtcManager?.initiateCall(callId, targetId, isVideo) { sigType, toUid, cId, data ->
+            val signal = WebRTCSignalDto(
+                callId = cId,
+                fromUserId = currentUserId,
+                toUserId = toUid,
+                signalType = sigType,
+                data = data
+            )
+            wsManager.sendWebRTCSignal(signal)
+        }
+    }
+
+    fun acceptIncomingCall() {
+        val incoming = _incomingCall.value ?: return
+        val currentUserId = currentOwnerId.toLongOrNull() ?: 0L
+
+        _incomingCall.value = null
+        _isPeerCameraOff.value = false
+        _activeCall.value = incoming.copy(isConnected = true)
+        startCallTimer()
+
+        val offer = pendingIncomingOffer
+        if (offer != null) {
+            webRtcManager?.handleOffer(offer) { sigType, toUid, cId, data ->
+                val signal = WebRTCSignalDto(
+                    callId = cId,
+                    fromUserId = currentUserId,
+                    toUserId = toUid,
+                    signalType = sigType,
+                    data = data
+                )
+                wsManager.sendWebRTCSignal(signal)
+            }
+            pendingIncomingOffer = null
+        } else {
+            val signal = WebRTCSignalDto(
+                callId = incoming.callId,
+                fromUserId = currentUserId,
+                toUserId = incoming.peerId,
+                signalType = "ANSWER",
+                data = "{\"callType\":\"${if (incoming.isVideo) "video" else "audio"}\"}"
+            )
+            wsManager.sendWebRTCSignal(signal)
+        }
+    }
+
+    fun rejectIncomingCall() {
+        val incoming = _incomingCall.value ?: return
+        val currentUserId = currentOwnerId.toLongOrNull() ?: 0L
+
+        _incomingCall.value = null
+        _isPeerCameraOff.value = false
+        pendingIncomingOffer = null
+        webRtcManager?.endCall()
+
+        val signal = WebRTCSignalDto(
+            callId = incoming.callId,
+            fromUserId = currentUserId,
+            toUserId = incoming.peerId,
+            signalType = "REJECT",
+            data = ""
+        )
+        wsManager.sendWebRTCSignal(signal)
+    }
+
+    fun endActiveCall() {
+        val active = _activeCall.value ?: return
+        val currentUserId = currentOwnerId.toLongOrNull() ?: 0L
+
+        stopCallTimer()
+        _activeCall.value = null
+        _isPeerCameraOff.value = false
+        pendingIncomingOffer = null
+        webRtcManager?.endCall()
+
+        val signal = WebRTCSignalDto(
+            callId = active.callId,
+            fromUserId = currentUserId,
+            toUserId = active.peerId,
+            signalType = "HANGUP",
+            data = ""
+        )
+        wsManager.sendWebRTCSignal(signal)
+    }
+
+    fun toggleCamera(cameraOff: Boolean) {
+        webRtcManager?.toggleCamera(cameraOff)
+        val active = _activeCall.value ?: return
+        val currentUserId = currentOwnerId.toLongOrNull() ?: 0L
+        val signal = WebRTCSignalDto(
+            callId = active.callId,
+            fromUserId = currentUserId,
+            toUserId = active.peerId,
+            signalType = "CAMERA_STATE",
+            data = """{"isVideoMuted":$cameraOff}"""
+        )
+        wsManager.sendWebRTCSignal(signal)
+    }
+
+    private fun startCallTimer() {
+        stopCallTimer()
+        callTimerJob = scope.launch {
+            while (isActive) {
+                delay(1000L)
+                val current = _activeCall.value ?: break
+                if (current.isConnected) {
+                    _activeCall.value = current.copy(durationSeconds = current.durationSeconds + 1)
+                }
+            }
+        }
+    }
+
+    private fun stopCallTimer() {
+        callTimerJob?.cancel()
+        callTimerJob = null
+    }
+
+    suspend fun getCallHistory(): Result<List<CallHistoryItemDto>> {
+        val currentUserId = currentOwnerId.toLongOrNull() ?: 0L
+        return try {
+            val resp = apiClient.service.getCallHistory(currentUserId)
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                Result.success(resp.body()?.data ?: emptyList())
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to fetch call history"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     fun getConversations(): Flow<List<ConversationEntity>> {
@@ -158,6 +444,54 @@ class ChatRepository(
 
     suspend fun getMessageById(msgId: String): MessageEntity? {
         return messageDao.getMessageById(currentOwnerId, msgId)
+    }
+
+    private fun parseIsoTime(timeStr: String?): Long {
+        if (timeStr.isNullOrBlank()) return System.currentTimeMillis()
+        timeStr.toLongOrNull()?.let { return it }
+        return try {
+            java.time.Instant.parse(timeStr).toEpochMilli()
+        } catch (_: Exception) {
+            try {
+                java.time.OffsetDateTime.parse(timeStr).toInstant().toEpochMilli()
+            } catch (_: Exception) {
+                try {
+                    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+                        .parse(timeStr)?.time ?: System.currentTimeMillis()
+                } catch (_: Exception) {
+                    System.currentTimeMillis()
+                }
+            }
+        }
+    }
+
+    private fun parseFileSize(sizeStr: String?): Long {
+        if (sizeStr.isNullOrBlank()) return 0L
+        sizeStr.toLongOrNull()?.let { return it }
+        val clean = Uri.decode(sizeStr).trim().uppercase()
+        return try {
+            when {
+                clean.endsWith("GB") -> {
+                    val num = clean.removeSuffix("GB").trim().toDouble()
+                    (num * 1024 * 1024 * 1024).toLong()
+                }
+                clean.endsWith("MB") -> {
+                    val num = clean.removeSuffix("MB").trim().toDouble()
+                    (num * 1024 * 1024).toLong()
+                }
+                clean.endsWith("KB") -> {
+                    val num = clean.removeSuffix("KB").trim().toDouble()
+                    (num * 1024).toLong()
+                }
+                clean.endsWith("B") -> {
+                    val num = clean.removeSuffix("B").trim().toDouble()
+                    num.toLong()
+                }
+                else -> 0L
+            }
+        } catch (_: Exception) {
+            0L
+        }
     }
 
     suspend fun refreshConversations() {
@@ -175,18 +509,112 @@ class ChatRepository(
                         title = dto.title ?: ("会话 " + dto.targetId),
                         avatar = dto.avatarText ?: "",
                         lastMessage = dto.lastMsgPreview,
-                        lastMessageTime = System.currentTimeMillis(),
+                        lastMessageTime = parseIsoTime(dto.lastMsgTime),
                         unreadCount = dto.unreadCount,
                         isPinned = dto.isPinned == 1,
                         isMuted = dto.isMuted == 1
                     )
                 }
-                for (conv in entities) {
-                    conversationDao.insertOrUpdate(conv)
+                if (entities.isNotEmpty()) {
+                    conversationDao.insertAll(entities)
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to refresh conversations", e)
+        }
+    }
+
+    suspend fun syncRemoteMessages(conversationId: String) {
+        val ownerId = currentOwnerId
+        try {
+            val localMaxSeq = messageDao.getMaxSeqByConversation(ownerId, conversationId) ?: 0L
+            val resp = apiClient.service.getMessages(convId = conversationId, lastSeqId = localMaxSeq, limit = 50)
+            if (resp.isSuccessful && resp.body()?.code == 0) {
+                val list = resp.body()?.data ?: emptyList()
+                // Clean up any temporary clientMsgId rows if remote server has synced the finalized message
+                list.forEach { wsMsg ->
+                    if (wsMsg.clientMsgId.isNotEmpty() && wsMsg.msgId > 0 && wsMsg.clientMsgId != wsMsg.msgId.toString()) {
+                        messageDao.deleteMessage(ownerId, wsMsg.clientMsgId)
+                    }
+                }
+                val entities = list.map { wsMsg ->
+                    var fileName: String? = null
+                    var fileSize: Long = 0
+                    var mediaUrl: String? = null
+
+                    if (wsMsg.msgType == MsgType.FILE || wsMsg.msgType == MsgType.IMAGE || wsMsg.msgType == MsgType.VOICE) {
+                        val raw = wsMsg.content.trim()
+                        if (raw.startsWith("{")) {
+                            try {
+                                val meta = gson.fromJson(raw, FileContentMeta::class.java)
+                                fileName = meta.name
+                                fileSize = meta.size
+                                mediaUrl = meta.url
+                            } catch (_: Exception) {}
+                        }
+                        if (mediaUrl.isNullOrEmpty() && (raw.startsWith("/") || raw.startsWith("http"))) {
+                            mediaUrl = raw
+                            try {
+                                val uri = Uri.parse(raw)
+                                val qName = uri.getQueryParameter("name")
+                                if (!qName.isNullOrBlank() && fileName.isNullOrBlank()) {
+                                    fileName = Uri.decode(qName)
+                                }
+                                val qSize = uri.getQueryParameter("size")
+                                if (!qSize.isNullOrBlank() && fileSize == 0L) {
+                                    fileSize = parseFileSize(qSize)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        if (fileName.isNullOrBlank()) {
+                            fileName = when (wsMsg.msgType) {
+                                MsgType.IMAGE -> "image.jpg"
+                                MsgType.VOICE -> "voice.mp4"
+                                else -> "file"
+                            }
+                        }
+                    }
+
+                    val targetMsgId = if (wsMsg.msgId > 0) wsMsg.msgId.toString() else wsMsg.clientMsgId
+                    val existing = messageDao.getMessageById(ownerId, targetMsgId)
+                        ?: (if (wsMsg.clientMsgId.isNotEmpty()) messageDao.getMessageById(ownerId, wsMsg.clientMsgId) else null)
+
+                    val localFilePath = existing?.localFilePath
+                    val isDownloaded = existing?.isDownloaded ?: (!localFilePath.isNullOrEmpty() && File(localFilePath).exists())
+
+                    MessageEntity(
+                        accountOwnerId = ownerId,
+                        msgId = targetMsgId,
+                        conversationId = wsMsg.conversationId,
+                        senderId = wsMsg.senderId.toString(),
+                        receiverId = wsMsg.receiverId.toString(),
+                        convType = if (wsMsg.convType == ConvType.GROUP) "group" else "single",
+                        contentType = when (wsMsg.msgType) {
+                            MsgType.IMAGE -> "image"
+                            MsgType.VOICE -> "voice"
+                            MsgType.FILE -> "file"
+                            MsgType.REVOKE -> "revoked"
+                            else -> "text"
+                        },
+                        content = wsMsg.content,
+                        quotedMsgId = if (wsMsg.quotedMsgId > 0) wsMsg.quotedMsgId.toString() else "",
+                        quotedContent = wsMsg.quotedContent,
+                        mediaUrl = mediaUrl,
+                        fileName = fileName ?: existing?.fileName,
+                        fileSize = if (fileSize > 0) fileSize else (existing?.fileSize ?: 0L),
+                        localFilePath = localFilePath,
+                        isDownloaded = isDownloaded,
+                        seq = wsMsg.seqId,
+                        status = "sent",
+                        timestamp = wsMsg.sendTime
+                    )
+                }
+                if (entities.isNotEmpty()) {
+                    messageDao.insertAll(entities)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync remote messages for $conversationId", e)
         }
     }
 
@@ -264,12 +692,11 @@ class ChatRepository(
         }
 
         if (!resp.isSuccessful || resp.body()?.code != 0) {
-            Log.e(TAG, "File upload server error: ${resp.body()?.msg}")
+            Log.e(TAG, "File upload server error: ${resp.body()?.msg ?: resp.errorBody()?.string()}")
             return false
         }
 
         val meta = resp.body()?.data ?: return false
-        val contentJson = gson.toJson(meta)
         val isImage = mimeType.startsWith("image/")
         val isVoice = mimeType.startsWith("audio/")
 
@@ -285,6 +712,15 @@ class ChatRepository(
             else -> MsgType.FILE
         }
 
+        // Standardize file URL across platforms
+        val rawUrl = meta.url.ifBlank { "/api/file/download?file_id=${meta.fileId}&name=${URLEncoder.encode(file.name, "UTF-8")}" }
+        var finalUrl = if (!rawUrl.contains("name=")) {
+            "$rawUrl${if (rawUrl.contains("?")) "&" else "?"}name=${URLEncoder.encode(file.name, "UTF-8")}"
+        } else rawUrl
+        if (!finalUrl.contains("size=")) {
+            finalUrl = "$finalUrl${if (finalUrl.contains("?")) "&" else "?"}size=${file.length()}"
+        }
+
         val entity = MessageEntity(
             accountOwnerId = ownerId,
             msgId = clientMsgId,
@@ -293,12 +729,12 @@ class ChatRepository(
             receiverId = targetId.toString(),
             convType = if (convType == ConvType.GROUP) "group" else "single",
             contentType = contentType,
-            content = contentJson,
+            content = finalUrl,
             quotedMsgId = if (quotedMsgId > 0) quotedMsgId.toString() else "",
             quotedContent = quotedContent,
-            mediaUrl = meta.url,
-            fileName = meta.name,
-            fileSize = meta.size,
+            mediaUrl = finalUrl,
+            fileName = file.name,
+            fileSize = if (meta.size > 0) meta.size else file.length(),
             localFilePath = file.absolutePath,
             isDownloaded = true,
             seq = 0,
@@ -315,12 +751,16 @@ class ChatRepository(
             senderId = senderId,
             receiverId = targetId,
             msgType = msgType,
-            content = contentJson,
+            content = finalUrl,
             quotedMsgId = quotedMsgId,
             quotedContent = quotedContent,
             sendTime = System.currentTimeMillis()
         )
-        return wsManager.sendMessage(wsMsg)
+        val sent = wsManager.sendMessage(wsMsg)
+        if (!sent) {
+            messageDao.updateStatus(ownerId, clientMsgId, "failed")
+        }
+        return sent
     }
 
     suspend fun downloadFile(
@@ -628,6 +1068,19 @@ class ChatRepository(
                 Result.success(Unit)
             } else {
                 Result.failure(Exception(resp.body()?.msg ?: "Failed to quit group"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getAISummary(conversationId: String, lang: String = "zh"): Result<AISummaryResp> {
+        return try {
+            val resp = apiClient.service.getAISummary(AISummaryReq(conversationId, lang))
+            if (resp.isSuccessful && resp.body()?.code == 0 && resp.body()?.data != null) {
+                Result.success(resp.body()!!.data!!)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "生成 AI 会话总结失败"))
             }
         } catch (e: Exception) {
             Result.failure(e)

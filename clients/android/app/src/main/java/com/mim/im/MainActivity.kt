@@ -1,20 +1,28 @@
 package com.mim.im
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.mim.im.ui.components.ActiveCallOverlay
+import com.mim.im.ui.components.IncomingCallDialog
 import com.mim.im.ui.screens.AuthScreen
 import com.mim.im.ui.screens.ChatScreen
 import com.mim.im.ui.screens.MainScreen
@@ -24,24 +32,72 @@ import java.net.URLEncoder
 
 class MainActivity : ComponentActivity() {
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        // Permissions handled
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Check & request runtime permissions for audio calls, video calls and push notifications
+        checkAndRequestPermissions()
 
         val app = application as MimApplication
 
         setContent {
             val palette by app.preferencesHelper.paletteFlow.collectAsState()
             val themeMode by app.preferencesHelper.themeModeFlow.collectAsState()
+            val incomingCall by app.chatRepository.incomingCall.collectAsState()
+            val activeCall by app.chatRepository.activeCall.collectAsState()
 
             MimTheme(palette = palette, themeMode = themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MimTheme.colors.background
                 ) {
-                    MimNavHost(app = app)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        MimNavHost(app = app)
+
+                        // Global Incoming Call Invitation Dialog
+                        incomingCall?.let { inc ->
+                            IncomingCallDialog(
+                                callState = inc,
+                                onAccept = { app.chatRepository.acceptIncomingCall() },
+                                onReject = { app.chatRepository.rejectIncomingCall() }
+                            )
+                        }
+
+                        // Global Active Call Fullscreen Stage
+                        activeCall?.let { act ->
+                            ActiveCallOverlay(
+                                callState = act,
+                                webRtcManager = app.webRtcManager,
+                                chatRepository = app.chatRepository,
+                                onEndCall = { app.chatRepository.endActiveCall() }
+                            )
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
+        val permissionsToRequest = mutableListOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CAMERA
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        val needed = permissionsToRequest.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) {
+            requestPermissionLauncher.launch(needed.toTypedArray())
         }
     }
 }
@@ -74,7 +130,8 @@ fun MimNavHost(app: MimApplication) {
                 chatRepo = app.chatRepository,
                 wsManager = app.wsManager,
                 onOpenChat = { convId, title, targetId, isGroup ->
-                    val encodedTitle = URLEncoder.encode(title, "UTF-8")
+                    val safeTitle = if (title.isBlank()) (if (isGroup) "群聊会话" else "私聊会话") else title
+                    val encodedTitle = URLEncoder.encode(safeTitle, "UTF-8")
                     navController.navigate("chat/$convId/$encodedTitle/$targetId/$isGroup")
                 },
                 onLogout = {

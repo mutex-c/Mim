@@ -820,6 +820,22 @@ export const useChatStore = defineStore('chat', () => {
         case CmdType.HeartbeatPong:
           break;
 
+        case CmdType.KickOut: {
+          const payloadStr = textDecoder.decode(frame.payload);
+          let reason = '您的账号已在另一台设备登录，当前连接已被断开。';
+          try {
+            const kickData = JSON.parse(payloadStr);
+            if (kickData.reason) reason = kickData.reason;
+          } catch (_) {}
+          console.warn('[WS] Kicked out:', reason);
+          if (socket) {
+            socket.close();
+            socket = null;
+          }
+          alert(reason);
+          break;
+        }
+
         case CmdType.MessageAck: {
           const payloadStr = textDecoder.decode(frame.payload);
           const ack = JSON.parse(payloadStr);
@@ -833,11 +849,47 @@ export const useChatStore = defineStore('chat', () => {
               target.status = 'sent';
               if (msgId) target.id = String(msgId);
               if (seqId) target.seqId = Number(seqId);
-              setTimeout(() => {
-                target.status = 'delivered';
-              }, 300);
               break;
             }
+          }
+          break;
+        }
+
+        case CmdType.DeliveryAck: {
+          const payloadStr = textDecoder.decode(frame.payload);
+          try {
+            const ack = JSON.parse(payloadStr);
+            const clientMsgId = ack.client_msg_id;
+            const seqId = Number(ack.seq_id || 0);
+            for (const convMsgs of Object.values(messagesByConv.value)) {
+              const target = convMsgs.find((m) => (clientMsgId && m.clientMsgId === clientMsgId) || (seqId > 0 && m.seqId === seqId));
+              if (target && target.status !== 'read') {
+                target.status = 'delivered';
+                break;
+              }
+            }
+          } catch (e) {
+            console.warn('[WS] Failed to parse delivery ack:', e);
+          }
+          break;
+        }
+
+        case CmdType.ReadReceipt: {
+          const payloadStr = textDecoder.decode(frame.payload);
+          try {
+            const receipt = JSON.parse(payloadStr);
+            const convId = receipt.conversation_id;
+            const readSeq = Number(receipt.read_seq_id || 0);
+            const convMsgs = messagesByConv.value[convId];
+            if (convMsgs && readSeq > 0) {
+              for (const m of convMsgs) {
+                if (m.isMe && m.seqId && m.seqId <= readSeq) {
+                  m.status = 'read';
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('[WS] Failed to parse read receipt:', e);
           }
           break;
         }
@@ -848,6 +900,24 @@ export const useChatStore = defineStore('chat', () => {
 
           const convId = pushMsg.conversation_id;
           const isMe = pushMsg.sender_id === currentUserId.value;
+
+          // Reply with DeliveryAck back to server for incoming peer messages
+          if (!isMe && socket && socket.readyState === WebSocket.OPEN) {
+            try {
+              const deliveryAck = {
+                client_msg_id: pushMsg.client_msg_id || '',
+                msg_id: Number(pushMsg.msg_id || 0),
+                conversation_id: convId,
+                seq_id: Number(pushMsg.seq_id || 0),
+                delivery_time: Date.now(),
+              };
+              const ackBytes = new TextEncoder().encode(JSON.stringify(deliveryAck));
+              const ackFrame = encodeFrame(CmdType.DeliveryAck, BigInt(pushMsg.seq_id || 0), FLAG_JSON, ackBytes);
+              socket.send(ackFrame);
+            } catch (e) {
+              console.warn('[WS] Failed to send delivery ack:', e);
+            }
+          }
 
           const now = new Date(pushMsg.send_time || Date.now());
           const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -1670,8 +1740,28 @@ export const useChatStore = defineStore('chat', () => {
     const c = conversations.value.find((item) => item.id === convId);
     if (!c) return;
     c.unreadCount = 0;
+
+    // Send ReadReceipt frame over WebSocket for real-time delivery to peer
+    const msgs = messagesByConv.value[convId] || [];
+    let maxSeq = 0;
+    for (const m of msgs) {
+      if (m.seqId && m.seqId > maxSeq) maxSeq = m.seqId;
+    }
+    if (socket && socket.readyState === WebSocket.OPEN && maxSeq > 0) {
+      try {
+        const payload = {
+          conversation_id: convId,
+          read_seq_id: maxSeq,
+          read_time: Date.now(),
+        };
+        const bytes = new TextEncoder().encode(JSON.stringify(payload));
+        const frame = encodeFrame(CmdType.ReadReceipt, BigInt(maxSeq), FLAG_JSON, bytes);
+        socket.send(frame);
+      } catch (_) {}
+    }
+
     try {
-      await fetch(`/api/chat/read-conversation?user_id=${currentUserId.value}`, {
+      await fetch('/api/chat/read-conversation', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

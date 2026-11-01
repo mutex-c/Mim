@@ -20,30 +20,38 @@
     </div>
 
     <!-- Modal Mode Auth (When Logged In and switching/adding accounts) -->
-    <AuthModal
-      v-if="chatStore.isLoggedIn && chatStore.showAuthModal"
-      :is-fullscreen="false"
-      @close="chatStore.showAuthModal = false"
-    />
+    <Transition name="app-modal">
+      <AuthModal
+        v-if="chatStore.isLoggedIn && chatStore.showAuthModal"
+        :is-fullscreen="false"
+        @close="chatStore.showAuthModal = false"
+      />
+    </Transition>
 
     <!-- Global Command Palette (Ctrl+K) -->
-    <CommandPalette
-      v-if="showCommandPalette && chatStore.isLoggedIn"
-      @close="showCommandPalette = false"
-      @open-settings="showSettings = true"
-    />
+    <Transition name="app-modal">
+      <CommandPalette
+        v-if="showCommandPalette && chatStore.isLoggedIn"
+        @close="showCommandPalette = false"
+        @open-settings="showSettings = true"
+      />
+    </Transition>
 
     <!-- Shortcuts Help Modal (Ctrl+/) -->
-    <ShortcutsHelpModal
-      v-if="showShortcutsHelp"
-      @close="showShortcutsHelp = false"
-    />
+    <Transition name="app-modal">
+      <ShortcutsHelpModal
+        v-if="showShortcutsHelp"
+        @close="showShortcutsHelp = false"
+      />
+    </Transition>
 
     <!-- Global Settings Modal -->
-    <SettingsModal
-      v-if="showSettings"
-      @close="showSettings = false"
-    />
+    <Transition name="app-modal">
+      <SettingsModal
+        v-if="showSettings"
+        @close="showSettings = false"
+      />
+    </Transition>
 
     <!-- Global Desktop Context Menu -->
     <ContextMenu />
@@ -267,3 +275,37 @@ onUnmounted(() => {
   window.removeEventListener('contextmenu', handleGlobalContextMenu);
 });
 </script>
+
+<style>
+/* App Modal Transitions (overlays/dialog spec) */
+.app-modal-enter-active {
+  transition: opacity 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.app-modal-leave-active {
+  transition: opacity 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.app-modal-enter-active > div {
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.app-modal-leave-active > div {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.app-modal-enter-from {
+  opacity: 0;
+}
+.app-modal-enter-from > div {
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+}
+
+.app-modal-leave-to {
+  opacity: 0;
+}
+.app-modal-leave-to > div {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+}
+</style>

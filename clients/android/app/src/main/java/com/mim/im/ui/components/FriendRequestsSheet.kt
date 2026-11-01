@@ -47,12 +47,15 @@ fun FriendRequestsSheet(
         }
     }
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     LaunchedEffect(Unit) {
         refreshList()
     }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = MimTheme.colors.surfaceElevated,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
@@ -115,7 +118,7 @@ fun FriendRequestsSheet(
                         .fillMaxWidth()
                         .heightIn(max = 420.dp)
                 ) {
-                    items(requests, key = { it.id }) { req ->
+                    items(requests) { req ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -123,21 +126,21 @@ fun FriendRequestsSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             MimAvatar(
-                                name = req.fromNickname.ifBlank { req.fromAccount },
+                                name = req.effectiveNickname,
                                 size = 44.dp
                             )
                             Spacer(modifier = Modifier.width(12.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = req.fromNickname.ifBlank { req.fromAccount },
+                                    text = req.effectiveNickname,
                                     style = MaterialTheme.typography.bodyLarge.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         color = MimTheme.colors.textPrimary
                                     )
                                 )
                                 Text(
-                                    text = if (req.message.isNotBlank()) req.message else "请求添加您为好友",
+                                    text = if (req.effectiveMessage.isNotBlank()) req.effectiveMessage else "请求添加您为好友",
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         color = MimTheme.colors.textSecondary
                                     ),
@@ -159,7 +162,7 @@ fun FriendRequestsSheet(
                                                         refreshList()
                                                         onRequestHandled()
                                                     } else {
-                                                        Toast.makeText(context, "操作失败", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, res.exceptionOrNull()?.message ?: "操作失败", Toast.LENGTH_SHORT).show()
                                                     }
                                                 }
                                             },
@@ -180,7 +183,7 @@ fun FriendRequestsSheet(
                                                         refreshList()
                                                         onRequestHandled()
                                                     } else {
-                                                        Toast.makeText(context, "操作失败", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, res.exceptionOrNull()?.message ?: "操作失败", Toast.LENGTH_SHORT).show()
                                                     }
                                                 }
                                             },

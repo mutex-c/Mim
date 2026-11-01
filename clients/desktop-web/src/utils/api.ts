@@ -42,40 +42,27 @@ export const setServerHost = (host: string): void => {
 };
 
 export const getApiBaseUrl = (): string => {
-  if (typeof window === 'undefined') return 'http://127.0.0.1:8080';
+  if (typeof window === 'undefined') return '';
 
-  // Web dev server with proxy (port 3000): keep relative so Vite proxy handles it
-  if (window.location.port === '3000' && !isTauriEnv()) {
-    return '';
-  }
-  // Direct backend serving (port 8080): relative works
-  if (window.location.port === '8080') {
-    return '';
-  }
-
-  const host = getServerHost();
-  if (host.startsWith('127.0.0.1') || host.startsWith('localhost') || host.includes(':8080')) {
+  // In Tauri Desktop, default to backend 127.0.0.1:8080 or custom host
+  if (isTauriEnv()) {
+    const host = getServerHost();
     return `http://${host}`;
   }
-  const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  return `${proto}//${host}`;
+
+  // In Browser (Direct backend serving or reverse proxy): relative URL always works perfectly!
+  return '';
 };
 
 export const getWsUrl = (userId: number | string, token: string, deviceId: string): string => {
   let host = getServerHost();
-  if (!isTauriEnv() && window.location.hostname !== 'tauri.localhost') {
-    host = (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')
-      ? `${window.location.hostname}:8080`
-      : window.location.host;
-  }
-
-  if (host.includes('tauri.localhost') || !host || host === 'localhost') {
+  if (isTauriEnv() || (typeof window !== 'undefined' && window.location.hostname === 'tauri.localhost')) {
     host = '127.0.0.1:8080';
+  } else if (typeof window !== 'undefined' && window.location.host) {
+    host = window.location.host;
   }
 
-  const proto = (host.startsWith('127.0.0.1') || host.startsWith('localhost') || host.includes(':8080'))
-    ? 'ws:'
-    : (window.location.protocol === 'https:' ? 'wss:' : 'ws:');
+  const proto = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
   return `${proto}//${host}/ws?user_id=${userId}&token=${encodeURIComponent(token)}&platform=desktop&device_id=${encodeURIComponent(deviceId)}`;
 };
 

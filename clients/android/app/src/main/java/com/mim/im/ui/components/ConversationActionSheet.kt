@@ -34,9 +34,11 @@ fun ConversationActionSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isGroup = conv.convType == "group"
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = MimTheme.colors.surfaceElevated,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
@@ -109,7 +111,7 @@ fun ConversationActionSheet(
                 }
             )
 
-            // 3. Clear Chat History
+            // Clear Chat History
             ActionRowItem(
                 icon = Icons.Default.CleaningServices,
                 label = "清空聊天记录",
@@ -127,6 +129,35 @@ fun ConversationActionSheet(
                     }
                 }
             )
+
+            // Voice & Video Call (only for single chats)
+            if (!isGroup) {
+                ActionRowItem(
+                    icon = Icons.Default.Phone,
+                    label = "语音通话",
+                    iconTint = Color(0xFF16A34A),
+                    onClick = {
+                        val targetId = conv.targetId.toLongOrNull() ?: 0L
+                        if (targetId > 0L) {
+                            onDismiss()
+                            chatRepo.initiateCall(targetId, conv.title, false)
+                        }
+                    }
+                )
+
+                ActionRowItem(
+                    icon = Icons.Default.Videocam,
+                    label = "视频通话",
+                    iconTint = MimTheme.colors.accent,
+                    onClick = {
+                        val targetId = conv.targetId.toLongOrNull() ?: 0L
+                        if (targetId > 0L) {
+                            onDismiss()
+                            chatRepo.initiateCall(targetId, conv.title, true)
+                        }
+                    }
+                )
+            }
 
             // 4. Delete Conversation
             ActionRowItem(

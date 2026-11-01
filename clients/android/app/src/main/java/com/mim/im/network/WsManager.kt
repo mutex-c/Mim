@@ -58,6 +58,9 @@ class WsManager(
     private val _revokeEvents = MutableSharedFlow<WsChatMessage>(extraBufferCapacity = 16)
     val revokeEvents: SharedFlow<WsChatMessage> = _revokeEvents
 
+    private val _webRtcSignals = MutableSharedFlow<WebRTCSignalDto>(extraBufferCapacity = 32)
+    val webRtcSignals: SharedFlow<WebRTCSignalDto> = _webRtcSignals
+
     @Synchronized
     fun connect() {
         val token = prefs.token ?: return
@@ -120,7 +123,13 @@ class WsManager(
             CmdType.HeartbeatPong -> {
                 Log.d(TAG, "Heartbeat Pong received, Seq: ${frame.seqId}")
             }
-            CmdType.ChatMessagePush -> {
+            CmdType.KickOut -> {
+                Log.w(TAG, "Account kicked out: logged in from another device")
+                scope.launch {
+                    disconnect()
+                }
+            }
+            CmdType.ChatMessagePush, CmdType.GroupMessagePush -> {
                 try {
                     val json = String(frame.payload, Charsets.UTF_8)
                     val msg = gson.fromJson(json, WsChatMessage::class.java)
@@ -128,6 +137,8 @@ class WsManager(
                     scope.launch {
                         _incomingMessages.emit(msg)
                     }
+                    // Automatically send delivery ACK back to server
+                    sendDeliveryAck(msg.clientMsgId, msg.msgId, msg.conversationId, msg.seqId)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to parse ChatMessagePush payload", e)
                 }
@@ -136,7 +147,7 @@ class WsManager(
                 try {
                     val json = String(frame.payload, Charsets.UTF_8)
                     val ack = gson.fromJson(json, WsMessageAck::class.java)
-                    Log.d(TAG, "Received Message Ack: ${ack.clientMsgId}, seq: ${ack.seqId}")
+                    Log.d(TAG, "Received Message Ack: clientMsgId=${ack.clientMsgId}, seq=${ack.seqId}, code=${ack.code}, msgId=${ack.msgId}")
                     scope.launch {
                         _messageAcks.emit(ack)
                     }
@@ -144,7 +155,7 @@ class WsManager(
                     Log.e(TAG, "Failed to parse ChatMessageAck payload", e)
                 }
             }
-            CmdType.RevokePush -> {
+            CmdType.RevokeNotify -> {
                 try {
                     val json = String(frame.payload, Charsets.UTF_8)
                     val msg = gson.fromJson(json, WsChatMessage::class.java)
@@ -156,7 +167,7 @@ class WsManager(
                     Log.e(TAG, "Failed to parse RevokePush payload", e)
                 }
             }
-            CmdType.SyncResp -> {
+            CmdType.SyncResp, CmdType.BatchSyncResp -> {
                 try {
                     val json = String(frame.payload, Charsets.UTF_8)
                     val syncResp = gson.fromJson(json, WsSyncResponse::class.java)
@@ -166,6 +177,18 @@ class WsManager(
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to parse SyncResp payload", e)
+                }
+            }
+            CmdType.WebRTCSignal -> {
+                try {
+                    val json = String(frame.payload, Charsets.UTF_8)
+                    val signal = gson.fromJson(json, WebRTCSignalDto::class.java)
+                    Log.d(TAG, "Received WebRTC Signal: ${signal.signalType}, callId: ${signal.callId}")
+                    scope.launch {
+                        _webRtcSignals.emit(signal)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse WebRTCSignal payload", e)
                 }
             }
             else -> {
@@ -207,6 +230,70 @@ class WsManager(
             ws.send(frame.encode().toByteString())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send sync frame", e)
+            false
+        }
+    }
+
+    fun sendWebRTCSignal(signal: WebRTCSignalDto): Boolean {
+        val ws = webSocket ?: return false
+        val json = gson.toJson(signal)
+        val payload = json.toByteArray(Charsets.UTF_8)
+        val frame = Frame(
+            cmdType = CmdType.WebRTCSignal,
+            seqId = 0,
+            flag = FrameFlag.JSON,
+            payload = payload
+        )
+        return try {
+            ws.send(frame.encode().toByteString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send WebRTC signal frame", e)
+            false
+        }
+    }
+
+    fun sendDeliveryAck(clientMsgId: String, msgId: Long, convId: String, seqId: Long): Boolean {
+        val ws = webSocket ?: return false
+        val payloadMap = mapOf(
+            "client_msg_id" to clientMsgId,
+            "msg_id" to msgId,
+            "conversation_id" to convId,
+            "seq_id" to seqId,
+            "delivery_time" to System.currentTimeMillis()
+        )
+        val json = gson.toJson(payloadMap)
+        val frame = Frame(
+            cmdType = CmdType.DeliveryAck,
+            seqId = seqId,
+            flag = FrameFlag.JSON,
+            payload = json.toByteArray(Charsets.UTF_8)
+        )
+        return try {
+            ws.send(frame.encode().toByteString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send delivery ack frame", e)
+            false
+        }
+    }
+
+    fun sendReadReceipt(convId: String, readSeq: Long): Boolean {
+        val ws = webSocket ?: return false
+        val payloadMap = mapOf(
+            "conversation_id" to convId,
+            "read_seq_id" to readSeq,
+            "read_time" to System.currentTimeMillis()
+        )
+        val json = gson.toJson(payloadMap)
+        val frame = Frame(
+            cmdType = CmdType.ReadReceipt,
+            seqId = readSeq,
+            flag = FrameFlag.JSON,
+            payload = json.toByteArray(Charsets.UTF_8)
+        )
+        return try {
+            ws.send(frame.encode().toByteString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send read receipt frame", e)
             false
         }
     }

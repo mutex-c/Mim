@@ -36,12 +36,25 @@ data class TokenPairDto(
 )
 
 data class UserDto(
-    val id: Long = 0,
+    @SerializedName(value = "id", alternate = ["friend_id", "user_id"]) val id: Long = 0,
     val account: String = "",
     val nickname: String = "",
     val avatar: String = "",
     val signature: String = "",
     val role: Int = 1
+) {
+    val effectiveId: Long get() = id
+    val displayName: String get() = nickname.ifBlank { account.ifBlank { "用户 $id" } }
+}
+
+data class DemoUserDto(
+    val user: UserDto,
+    val token: TokenPairDto
+)
+
+data class UserProfileRespDto(
+    val user: UserDto,
+    val config: Map<String, Any>? = null
 )
 
 data class UserInfo(
@@ -72,28 +85,28 @@ object ConvType {
 }
 
 data class WsChatMessage(
-    @SerializedName("msg_id") val msgId: Long = 0,
-    @SerializedName("client_msg_id") val clientMsgId: String = "",
-    @SerializedName("conversation_id") val conversationId: String = "",
-    @SerializedName("conv_type") val convType: Int = ConvType.SINGLE,
-    @SerializedName("sender_id") val senderId: Long = 0,
-    @SerializedName("receiver_id") val receiverId: Long = 0,
-    @SerializedName("msg_type") val msgType: Int = MsgType.TEXT,
+    @SerializedName("msg_id", alternate = ["msgId", "MsgId", "id", "ID"]) val msgId: Long = 0,
+    @SerializedName("client_msg_id", alternate = ["clientMsgId", "ClientMsgId"]) val clientMsgId: String = "",
+    @SerializedName("conversation_id", alternate = ["conversationId"]) val conversationId: String = "",
+    @SerializedName("conv_type", alternate = ["convType"]) val convType: Int = ConvType.SINGLE,
+    @SerializedName("sender_id", alternate = ["senderId"]) val senderId: Long = 0,
+    @SerializedName("receiver_id", alternate = ["receiverId"]) val receiverId: Long = 0,
+    @SerializedName("msg_type", alternate = ["msgType"]) val msgType: Int = MsgType.TEXT,
     val content: String = "",
-    @SerializedName("quoted_msg_id") val quotedMsgId: Long = 0,
-    @SerializedName("quoted_content") val quotedContent: String = "",
-    @SerializedName("seq_id") val seqId: Long = 0,
-    @SerializedName("send_time") val sendTime: Long = System.currentTimeMillis(),
-    @SerializedName("is_encrypted") val isEncrypted: Boolean = false
+    @SerializedName("quoted_msg_id", alternate = ["quotedMsgId"]) val quotedMsgId: Long = 0,
+    @SerializedName("quoted_content", alternate = ["quotedContent"]) val quotedContent: String = "",
+    @SerializedName("seq_id", alternate = ["seqId", "SeqId"]) val seqId: Long = 0,
+    @SerializedName("send_time", alternate = ["sendTime", "CreatedAt", "created_at"]) val sendTime: Long = System.currentTimeMillis(),
+    @SerializedName("is_encrypted", alternate = ["isEncrypted"]) val isEncrypted: Boolean = false
 )
 
 data class WsMessageAck(
-    @SerializedName("client_msg_id") val clientMsgId: String = "",
-    @SerializedName("msg_id") val msgId: Long = 0,
-    @SerializedName("seq_id") val seqId: Long = 0,
-    val code: Int = 0,
-    @SerializedName("error_msg") val errorMsg: String = "",
-    @SerializedName("server_time") val serverTime: Long = 0
+    @SerializedName("client_msg_id", alternate = ["clientMsgId", "ClientMsgId"]) val clientMsgId: String = "",
+    @SerializedName("msg_id", alternate = ["msgId", "MsgId", "id", "ID"]) val msgId: Long = 0,
+    @SerializedName("seq_id", alternate = ["seqId", "SeqId"]) val seqId: Long = 0,
+    @SerializedName("code", alternate = ["Code"]) val code: Int = 0,
+    @SerializedName("error_msg", alternate = ["errorMsg", "ErrorMsg"]) val errorMsg: String = "",
+    @SerializedName("server_time", alternate = ["serverTime", "ServerTime"]) val serverTime: Long = 0
 )
 
 data class WsSyncRequest(
@@ -111,10 +124,11 @@ data class WsSyncResponse(
 
 // File attachment metadata inside message content or for upload
 data class FileContentMeta(
-    val url: String = "",
-    val name: String = "",
-    val size: Long = 0,
-    val mime: String = ""
+    @SerializedName("url", alternate = ["file_url", "fileUrl"]) val url: String = "",
+    @SerializedName("name", alternate = ["file_name", "fileName"]) val name: String = "",
+    @SerializedName("size", alternate = ["file_size", "fileSize"]) val size: Long = 0,
+    @SerializedName("mime", alternate = ["mime_type", "mimeType"]) val mime: String = "",
+    @SerializedName("file_id", alternate = ["id", "fileId"]) val fileId: Long = 0
 )
 
 // --- Conversation & Group HTTP Models ---
@@ -176,15 +190,25 @@ data class ReadConversationRequest(
 
 data class FriendRequestDto(
     val id: Long = 0,
+    @SerializedName("sender_id") val senderId: Long = 0,
     @SerializedName("from_user_id") val fromUserId: Long = 0,
     @SerializedName("to_user_id") val toUserId: Long = 0,
+    @SerializedName("nickname") val nickname: String = "",
     @SerializedName("from_nickname") val fromNickname: String = "",
+    @SerializedName("avatar") val avatar: String = "",
     @SerializedName("from_avatar") val fromAvatar: String = "",
+    @SerializedName("account") val account: String = "",
     @SerializedName("from_account") val fromAccount: String = "",
+    @SerializedName("verify_msg") val verifyMsg: String = "",
     val message: String = "",
     val status: Int = 1,
     @SerializedName("created_at") val createdAt: String = ""
-)
+) {
+    val effectiveSenderId: Long get() = if (senderId > 0) senderId else fromUserId
+    val effectiveNickname: String get() = nickname.ifBlank { fromNickname.ifBlank { effectiveAccount } }
+    val effectiveAccount: String get() = account.ifBlank { fromAccount.ifBlank { "User$effectiveSenderId" } }
+    val effectiveMessage: String get() = verifyMsg.ifBlank { message }
+}
 
 data class HandleFriendRequestReq(
     @SerializedName("request_id") val requestId: Long,
@@ -262,4 +286,47 @@ data class MuteConversationReq(
 
 data class ConvActionReq(
     @SerializedName("conversation_id") val conversationId: String
+)
+
+// --- AI Summary DTOs ---
+
+data class AISummaryReq(
+    @SerializedName("conversation_id") val conversationId: String,
+    val lang: String = "zh"
+)
+
+data class AISummaryResp(
+    val summary: String = "",
+    val count: Int = 0
+)
+
+// --- WebRTC Call Signaling DTOs ---
+
+data class WebRTCSignalDto(
+    @SerializedName("call_id") val callId: String = "",
+    @SerializedName("from_user_id") val fromUserId: Long = 0,
+    @SerializedName("to_user_id") val toUserId: Long = 0,
+    @SerializedName("signal_type") val signalType: String = "", // "OFFER", "ANSWER", "CANDIDATE", "HANGUP", "REJECT"
+    val data: String = ""
+)
+
+data class CallHistoryItemDto(
+    val id: String = "",
+    @SerializedName("from_user") val fromUser: String = "",
+    @SerializedName("to_user") val toUser: String = "",
+    @SerializedName("call_type") val callType: String = "", // "video" / "audio"
+    val status: String = "", // "Completed" / "Missed" / "Rejected"
+    val duration: Int = 0,
+    @SerializedName("created_at") val createdAt: String = "",
+    @SerializedName("is_caller") val isCaller: Boolean = false
+)
+
+data class CallSessionState(
+    val callId: String,
+    val peerId: Long,
+    val peerName: String,
+    val isVideo: Boolean,
+    val isOutgoing: Boolean,
+    val isConnected: Boolean = false,
+    val durationSeconds: Int = 0
 )

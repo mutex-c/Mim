@@ -59,61 +59,63 @@
       ></span>
 
       <!-- Account Switcher Popover -->
-      <div
-        v-if="showAccountMenu"
-        class="absolute left-16 top-0 w-64 rounded-xl bg-mim-light-card dark:bg-mim-dark-card shadow-2xl border border-black/5 dark:border-white/10 p-2.5 z-50 flex flex-col gap-1.5"
-      >
-        <div class="px-2 py-1.5 text-[11px] font-semibold text-mim-light-muted dark:text-mim-dark-muted uppercase tracking-wider">
-          {{ langStore.t('nav.switchAccount') }}
-        </div>
-        <button
-          v-for="item in chatStore.demoUsers"
-          :key="item.user.id"
-          @click="selectUser(item)"
-          class="flex items-center gap-2.5 p-2 rounded-lg text-left text-xs transition-colors cursor-pointer"
-          :class="chatStore.currentUserId === item.user.id
-            ? 'bg-mim-accent-subtle/50 text-mim-accent font-semibold ring-1 ring-mim-accent/30'
-            : 'text-mim-light-text dark:text-mim-dark-text hover:bg-black/5 dark:hover:bg-white/5'"
+      <Transition name="popover-dock">
+        <div
+          v-if="showAccountMenu"
+          class="absolute left-16 top-0 w-64 rounded-xl bg-mim-light-card dark:bg-mim-dark-card shadow-2xl border border-black/5 dark:border-white/10 p-2.5 z-50 flex flex-col gap-1.5"
         >
-          <div
-            class="w-7 h-7 rounded-lg font-bold flex items-center justify-center text-xs shrink-0"
-            :class="chatStore.currentUserId === item.user.id ? 'ring-1.5 ring-emerald-500 ring-offset-1' : 'ring-1 ring-black/10 dark:ring-white/20'"
-            :style="{ backgroundColor: getAvatarColor(item.user.id).bg, color: getAvatarColor(item.user.id).text }"
-          >
-            {{ item.user.avatar || item.user.nickname.substring(0, 2).toUpperCase() }}
+          <div class="px-2 py-1.5 text-[11px] font-semibold text-mim-light-muted dark:text-mim-dark-muted uppercase tracking-wider">
+            {{ langStore.t('nav.switchAccount') }}
           </div>
-          <div class="flex-1 min-w-0">
-            <div class="truncate">{{ item.user.nickname }}</div>
-            <div class="text-[10px] text-mim-light-muted dark:text-mim-dark-muted font-mono truncate">ID: {{ item.user.id }} ({{ item.user.account }})</div>
+          <button
+            v-for="item in chatStore.demoUsers"
+            :key="item.user.id"
+            @click="selectUser(item)"
+            class="flex items-center gap-2.5 p-2 rounded-lg text-left text-xs transition-colors cursor-pointer"
+            :class="chatStore.currentUserId === item.user.id
+              ? 'bg-mim-accent-subtle/50 text-mim-accent font-semibold ring-1 ring-mim-accent/30'
+              : 'text-mim-light-text dark:text-mim-dark-text hover:bg-black/5 dark:hover:bg-white/5'"
+          >
+            <div
+              class="w-7 h-7 rounded-lg font-bold flex items-center justify-center text-xs shrink-0"
+              :class="chatStore.currentUserId === item.user.id ? 'ring-1.5 ring-emerald-500 ring-offset-1' : 'ring-1 ring-black/10 dark:ring-white/20'"
+              :style="{ backgroundColor: getAvatarColor(item.user.id).bg, color: getAvatarColor(item.user.id).text }"
+            >
+              {{ item.user.avatar || item.user.nickname.substring(0, 2).toUpperCase() }}
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="truncate">{{ item.user.nickname }}</div>
+              <div class="text-[10px] text-mim-light-muted dark:text-mim-dark-muted font-mono truncate">ID: {{ item.user.id }} ({{ item.user.account }})</div>
+            </div>
+            <Check v-if="chatStore.currentUserId === item.user.id" class="w-3.5 h-3.5 text-mim-accent shrink-0 inline-icon" />
+          </button>
+
+          <!-- Extra Auth Actions -->
+          <div class="mt-1 pt-1.5 border-t border-black/5 dark:border-white/10 flex flex-col gap-0.5">
+            <button
+              @click="openAuth"
+              class="w-full flex items-center gap-2 p-1.5 rounded-lg text-xs text-mim-light-text dark:text-mim-dark-text hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <UserPlus class="w-3.5 h-3.5 inline-icon text-mim-accent shrink-0" />
+              <span>{{ langStore.t('auth.loginOtherAccount') }}</span>
+            </button>
+            <button
+              @click="handleLogout"
+              class="w-full flex items-center gap-2 p-1.5 rounded-lg text-xs text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+            >
+              <LogOut class="w-3.5 h-3.5 inline-icon text-rose-500 shrink-0" />
+              <span>{{ langStore.t('auth.logoutBtn') }}</span>
+            </button>
           </div>
-          <Check v-if="chatStore.currentUserId === item.user.id" class="w-3.5 h-3.5 text-mim-accent shrink-0 inline-icon" />
-        </button>
 
-        <!-- Extra Auth Actions -->
-        <div class="mt-1 pt-1.5 border-t border-black/5 dark:border-white/10 flex flex-col gap-0.5">
-          <button
-            @click="openAuth"
-            class="w-full flex items-center gap-2 p-1.5 rounded-lg text-xs text-mim-light-text dark:text-mim-dark-text hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
-          >
-            <UserPlus class="w-3.5 h-3.5 inline-icon text-mim-accent shrink-0" />
-            <span>{{ langStore.t('auth.loginOtherAccount') }}</span>
-          </button>
-          <button
-            @click="handleLogout"
-            class="w-full flex items-center gap-2 p-1.5 rounded-lg text-xs text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
-          >
-            <LogOut class="w-3.5 h-3.5 inline-icon text-rose-500 shrink-0" />
-            <span>{{ langStore.t('auth.logoutBtn') }}</span>
-          </button>
+          <div class="mt-1 pt-1.5 border-t border-black/5 dark:border-white/10 px-2 py-1 text-[10px] text-mim-light-muted dark:text-mim-dark-muted flex items-center justify-between">
+            <span>{{ langStore.t('nav.backendWs') }}:</span>
+            <span :class="chatStore.isWsConnected ? 'text-emerald-500' : 'text-amber-500 font-medium'">
+              {{ chatStore.isWsConnected ? langStore.t('nav.online') : langStore.t('nav.offline') }}
+            </span>
+          </div>
         </div>
-
-        <div class="mt-1 pt-1.5 border-t border-black/5 dark:border-white/10 px-2 py-1 text-[10px] text-mim-light-muted dark:text-mim-dark-muted flex items-center justify-between">
-          <span>{{ langStore.t('nav.backendWs') }}:</span>
-          <span :class="chatStore.isWsConnected ? 'text-emerald-500' : 'text-amber-500 font-medium'">
-            {{ chatStore.isWsConnected ? langStore.t('nav.online') : langStore.t('nav.offline') }}
-          </span>
-        </div>
-      </div>
+      </Transition>
     </div>
 
     <!-- Main Navigation Icons -->
@@ -122,7 +124,7 @@
         v-for="item in navItems"
         :key="item.id"
         @click="navigateTo(item.path)"
-        class="w-full h-11 rounded-2xl flex items-center justify-center transition-all duration-200 relative group cursor-pointer"
+        class="w-full h-11 rounded-2xl flex items-center justify-center transition-[background-color,transform,box-shadow] duration-150 active:scale-95 relative group cursor-pointer"
         :class="isItemActive(item) 
           ? (themeStore.currentPalette === 'vodyanitsa'
               ? 'bg-gradient-to-r from-cyan-500/30 via-cyan-400/15 to-transparent shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]'
@@ -204,7 +206,7 @@
       <!-- Theme / Display Switcher Button -->
       <button
         @click="cycleTheme"
-        class="w-full h-10 rounded-xl flex items-center justify-center transition-all duration-200 relative group cursor-pointer"
+        class="w-full h-10 rounded-xl flex items-center justify-center transition-[background-color,transform] duration-150 active:scale-90 relative group cursor-pointer"
         :class="themeStore.currentPalette === 'vodyanitsa' ? 'hover:bg-cyan-900/25' : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5'"
         title="切换外观主题"
       >
@@ -222,7 +224,7 @@
       <!-- Settings Button -->
       <button
         @click="$emit('open-settings')"
-        class="w-full h-10 rounded-xl flex items-center justify-center transition-all duration-200 relative group cursor-pointer"
+        class="w-full h-10 rounded-xl flex items-center justify-center transition-[background-color,transform] duration-150 active:scale-90 relative group cursor-pointer"
         :class="themeStore.currentPalette === 'vodyanitsa' ? 'hover:bg-cyan-900/25' : 'text-mim-light-muted dark:text-mim-dark-muted hover:bg-black/5 dark:hover:bg-white/5'"
         :title="langStore.t('nav.settings')"
       >
@@ -320,3 +322,23 @@ const selectUser = (u: DemoUser) => {
   showAccountMenu.value = false;
 };
 </script>
+
+<style scoped>
+/* Account Popover Transition (overlays/popover spec) */
+.popover-dock-enter-active {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.popover-dock-leave-active {
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.popover-dock-enter-from {
+  opacity: 0;
+  transform: translateX(-6px) scale(0.96);
+}
+.popover-dock-leave-to {
+  opacity: 0;
+  transform: translateX(-4px) scale(0.98);
+}
+</style>

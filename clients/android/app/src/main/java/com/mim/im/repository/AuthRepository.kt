@@ -54,6 +54,20 @@ class AuthRepository(
         try {
             val resp = apiClient.service.getDemoUsers()
             if (resp.isSuccessful && resp.body()?.code == 0) {
+                val list = resp.body()?.data?.map { it.user } ?: emptyList()
+                Result.success(list)
+            } else {
+                Result.failure(Exception(resp.body()?.msg ?: "Failed to fetch demo users"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getDemoUsersWithTokens(): Result<List<DemoUserDto>> = withContext(Dispatchers.IO) {
+        try {
+            val resp = apiClient.service.getDemoUsers()
+            if (resp.isSuccessful && resp.body()?.code == 0) {
                 Result.success(resp.body()?.data ?: emptyList())
             } else {
                 Result.failure(Exception(resp.body()?.msg ?: "Failed to fetch demo users"))
@@ -61,6 +75,17 @@ class AuthRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    fun loginWithToken(user: UserDto, accessToken: String) {
+        prefs.token = accessToken
+        prefs.currentUser = UserInfo(
+            id = user.id.toString(),
+            username = user.account,
+            nickname = user.nickname,
+            avatar = user.avatar
+        )
+        wsManager.connect()
     }
 
     suspend fun getFriends(): Result<List<UserDto>> = withContext(Dispatchers.IO) {
@@ -96,7 +121,14 @@ class AuthRepository(
                 val message = resp.body()?.data?.get("msg")?.toString() ?: "申请已发送"
                 Result.success(message)
             } else {
-                Result.failure(Exception(resp.body()?.msg ?: "Failed to send friend request"))
+                val errMsg = resp.body()?.msg ?: "Failed to send friend request"
+                val friendlyMsg = when {
+                    errMsg.contains("already friends") -> "已经是好友了"
+                    errMsg.contains("cannot add yourself") -> "不能添加自己为好友"
+                    errMsg.contains("already pending") -> "好友申请已发送，等待对方通过"
+                    else -> errMsg
+                }
+                Result.failure(Exception(friendlyMsg))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -122,7 +154,13 @@ class AuthRepository(
             if (resp.isSuccessful && resp.body()?.code == 0) {
                 Result.success(Unit)
             } else {
-                Result.failure(Exception(resp.body()?.msg ?: "Failed to process friend request"))
+                val errMsg = resp.body()?.msg ?: "Failed to process friend request"
+                val friendlyMsg = when {
+                    errMsg.contains("already processed") -> "该申请已被处理"
+                    errMsg.contains("permission denied") -> "没有处理权限"
+                    else -> errMsg
+                }
+                Result.failure(Exception(friendlyMsg))
             }
         } catch (e: Exception) {
             Result.failure(e)

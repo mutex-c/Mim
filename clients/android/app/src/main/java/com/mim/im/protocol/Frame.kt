@@ -7,20 +7,28 @@ import java.util.zip.CRC32
 object CmdType {
     const val HeartbeatPing: Short = 0x0001
     const val HeartbeatPong: Short = 0x0002
+    const val KickOut: Short = 0x0006
     const val AuthReq: Short = 0x0010
     const val AuthResp: Short = 0x0011
 
     const val ChatMessageSend: Short = 0x0100
-    const val ChatMessageAck: Short = 0x0101
-    const val ChatMessagePush: Short = 0x0102
+    const val ChatMessagePush: Short = 0x0101
+    const val ChatMessageAck: Short = 0x0102
+    const val DeliveryAck: Short = 0x0103
 
-    const val SyncReq: Short = 0x0200
-    const val SyncResp: Short = 0x0201
+    const val GroupMessageSend: Short = 0x0200
+    const val GroupMessagePush: Short = 0x0201
 
-    const val RevokeReq: Short = 0x0300
-    const val RevokePush: Short = 0x0302
+    const val SyncReq: Short = 0x0300
+    const val SyncResp: Short = 0x0301
+    const val BatchSyncReq: Short = 0x0302
+    const val BatchSyncResp: Short = 0x0303
 
-    const val WebRTCSignal: Short = 0x0400
+    const val RevokeNotify: Short = 0x0400
+    const val RevokePush: Short = 0x0400
+    const val ReadReceipt: Short = 0x0401
+
+    const val WebRTCSignal: Short = 0x0500
 }
 
 object FrameFlag {

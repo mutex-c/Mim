@@ -48,6 +48,8 @@ fun MainScreen(
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Chats, 1: Contacts, 2: Settings
     var showServerConfig by remember { mutableStateOf(false) }
     var showNewGroupDialog by remember { mutableStateOf(false) }
+    var showAddFriendModal by remember { mutableStateOf(false) }
+    var showCallHistorySheet by remember { mutableStateOf(false) }
     var selectedConvForAction by remember { mutableStateOf<ConversationEntity?>(null) }
 
     val conversations by chatRepo.getConversations().collectAsState(initial = emptyList())
@@ -95,6 +97,45 @@ fun MainScreen(
             onActionCompleted = {
                 selectedConvForAction = null
                 scope.launch { chatRepo.refreshConversations() }
+            }
+        )
+    }
+
+    if (showAddFriendModal) {
+        val myId = prefs.currentUser?.id ?: "0"
+        val singleFriendIds = remember(conversations) {
+            conversations.filter { it.convType == "single" }.mapNotNull { it.targetId.toLongOrNull() }.toSet()
+        }
+        AddFriendSearchDialog(
+            authRepo = authRepo,
+            myUserId = myId,
+            friendIds = singleFriendIds,
+            onDismiss = { showAddFriendModal = false },
+            onFriendAddedOrRequested = {
+                showAddFriendModal = false
+                scope.launch { chatRepo.refreshConversations() }
+            }
+        )
+    }
+
+    if (showCallHistorySheet) {
+        CallHistorySheet(
+            chatRepo = chatRepo,
+            onDismiss = { showCallHistorySheet = false },
+            onRedial = { peerId, peerName, isVideo ->
+                showCallHistorySheet = false
+                val targetConv = conversations.firstOrNull {
+                    it.convType == "single" && (it.targetId.toLongOrNull() == peerId || it.title.equals(peerName, ignoreCase = true))
+                } ?: conversations.firstOrNull { it.convType == "single" }
+
+                if (targetConv != null) {
+                    val convTargetId = targetConv.targetId.toLongOrNull() ?: peerId
+                    chatRepo.initiateCall(
+                        targetId = convTargetId,
+                        targetName = targetConv.title.ifBlank { peerName },
+                        isVideo = isVideo
+                    )
+                }
             }
         )
     }
@@ -173,12 +214,36 @@ fun MainScreen(
 
                     // Action buttons
                     IconButton(
+                        onClick = { showAddFriendModal = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = "添加好友",
+                            tint = MimTheme.colors.accent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    IconButton(
                         onClick = { showNewGroupDialog = true },
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.GroupAdd,
                             contentDescription = "发起群聊",
+                            tint = MimTheme.colors.accent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showCallHistorySheet = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhoneInTalk,
+                            contentDescription = "通话记录",
                             tint = MimTheme.colors.accent,
                             modifier = Modifier.size(20.dp)
                         )
@@ -322,9 +387,11 @@ fun MainScreen(
                     onChatWithUser = { u ->
                         val myId = prefs.currentUser?.id?.toLongOrNull() ?: 0L
                         val targetId = u.id
+                        if (targetId <= 0L) return@ContactsView
                         val convId = if (myId < targetId) "${myId}_${targetId}" else "${targetId}_${myId}"
-                        onOpenChat(convId, u.nickname.ifEmpty { u.account }, targetId, false)
-                    }
+                        onOpenChat(convId, u.displayName, targetId, false)
+                    },
+                    onOpenAddFriend = { showAddFriendModal = true }
                 )
                 2 -> SettingsScreen(
                     prefs = prefs,
@@ -543,7 +610,8 @@ fun formatLastMessage(raw: String): String {
 fun ContactsView(
     authRepo: AuthRepository,
     myUserId: String,
-    onChatWithUser: (UserDto) -> Unit
+    onChatWithUser: (UserDto) -> Unit,
+    onOpenAddFriend: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var friends by remember { mutableStateOf<List<UserDto>>(emptyList()) }
@@ -556,9 +624,16 @@ fun ContactsView(
 
     fun refreshData() {
         scope.launch {
-            authRepo.getFriends().onSuccess { friends = it }
-            if (friends.isEmpty()) {
-                authRepo.getDemoUsers().onSuccess { friends = it }
+            val friendsRes = authRepo.getFriends()
+            if (friendsRes.isSuccess) {
+                val list = friendsRes.getOrDefault(emptyList())
+                if (list.isNotEmpty()) {
+                    friends = list
+                } else {
+                    authRepo.getDemoUsers().onSuccess { demoList ->
+                        friends = demoList
+                    }
+                }
             }
             authRepo.getFriendRequests().onSuccess { reqs ->
                 pendingRequestCount = reqs.count { it.status == 1 }
@@ -568,6 +643,16 @@ fun ContactsView(
 
     LaunchedEffect(Unit) {
         refreshData()
+    }
+
+    LaunchedEffect(searchKeyword) {
+        val kw = searchKeyword.trim()
+        if (kw.isNotBlank()) {
+            kotlinx.coroutines.delay(300)
+            authRepo.searchUsers(kw).onSuccess { res -> searchResults = res }
+        } else {
+            searchResults = emptyList()
+        }
     }
 
     if (showFriendRequestsSheet) {
@@ -597,16 +682,7 @@ fun ContactsView(
     ) {
         OutlinedTextField(
             value = searchKeyword,
-            onValueChange = {
-                searchKeyword = it
-                if (it.isNotBlank()) {
-                    scope.launch {
-                        authRepo.searchUsers(it).onSuccess { res -> searchResults = res }
-                    }
-                } else {
-                    searchResults = emptyList()
-                }
-            },
+            onValueChange = { searchKeyword = it },
             placeholder = { Text("搜索用户昵称或唯一账号...", color = MimTheme.colors.textMuted) },
             leadingIcon = {
                 Icon(
@@ -630,68 +706,119 @@ fun ContactsView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // "新的朋友" Entry Row
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MimTheme.colors.surfaceElevated,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .border(1.dp, MimTheme.colors.border, RoundedCornerShape(12.dp))
-                .clickable { showFriendRequestsSheet = true }
+        // Navigation Tiles: "添加好友" and "新的朋友"
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
+            // "添加好友" Tile
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MimTheme.colors.surfaceElevated,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, MimTheme.colors.border, RoundedCornerShape(12.dp))
+                    .clickable { onOpenAddFriend() }
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MimTheme.colors.accent),
-                    contentAlignment = Alignment.Center
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PersonAdd,
-                        contentDescription = "新的朋友",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "新的朋友",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MimTheme.colors.textPrimary
-                        )
-                    )
-                    Text(
-                        text = "查看好友申请与处理",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = MimTheme.colors.textMuted,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-
-                if (pendingRequestCount > 0) {
                     Box(
                         modifier = Modifier
-                            .clip(CircleShape)
-                            .background(Color(0xFFEF4444))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MimTheme.colors.accent),
+                        contentAlignment = Alignment.Center
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = "添加好友",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column {
                         Text(
-                            text = pendingRequestCount.toString(),
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "添加好友",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MimTheme.colors.textPrimary
+                            )
+                        )
+                        Text(
+                            text = "搜索全网账号",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MimTheme.colors.textMuted,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            // "新的朋友" Tile
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MimTheme.colors.surfaceElevated,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, MimTheme.colors.border, RoundedCornerShape(12.dp))
+                    .clickable { showFriendRequestsSheet = true }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BadgedBox(
+                        badge = {
+                            if (pendingRequestCount > 0) {
+                                Badge(
+                                    containerColor = Color(0xFFEF4444),
+                                    contentColor = Color.White
+                                ) {
+                                    Text(pendingRequestCount.toString())
+                                }
+                            }
+                        }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MimTheme.colors.accent.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "新的朋友",
+                                tint = MimTheme.colors.accent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column {
+                        Text(
+                            text = "新的朋友",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MimTheme.colors.textPrimary
+                            )
+                        )
+                        Text(
+                            text = "申请与审核",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MimTheme.colors.textMuted,
+                                fontSize = 11.sp
+                            )
                         )
                     }
                 }
@@ -733,7 +860,10 @@ fun ContactsView(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .border(1.dp, MimTheme.colors.border, RoundedCornerShape(12.dp))
-                        .clickable { onChatWithUser(user) }
+                        .then(
+                            if (isFriend) Modifier.clickable { onChatWithUser(user) }
+                            else Modifier
+                        )
                 ) {
                     Row(
                         modifier = Modifier
@@ -742,7 +872,7 @@ fun ContactsView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         MimAvatar(
-                            name = user.nickname.ifEmpty { user.account },
+                            name = user.displayName,
                             size = 40.dp
                         )
 
@@ -750,7 +880,7 @@ fun ContactsView(
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = user.nickname.ifEmpty { user.account },
+                                text = user.displayName,
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MimTheme.colors.textPrimary

@@ -21,8 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,12 +29,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import android.util.Log
 import coil.compose.AsyncImage
 import com.mim.im.data.local.MessageEntity
 import com.mim.im.data.model.ConvType
@@ -83,6 +84,27 @@ fun ChatScreen(
     var showGroupSettings by remember { mutableStateOf(false) }
     var replyingToMessage by remember { mutableStateOf<MessageEntity?>(null) }
 
+    var showAISummarySheet by remember { mutableStateOf(false) }
+    var isGeneratingSummary by remember { mutableStateOf(false) }
+    var aiSummaryText by remember { mutableStateOf("") }
+    var aiSummaryCount by remember { mutableIntStateOf(0) }
+
+    fun triggerAISummary() {
+        showAISummarySheet = true
+        isGeneratingSummary = true
+        scope.launch {
+            val res = chatRepo.getAISummary(conversationId)
+            isGeneratingSummary = false
+            if (res.isSuccess) {
+                val data = res.getOrNull()
+                aiSummaryText = data?.summary ?: ""
+                aiSummaryCount = data?.count ?: 0
+            } else {
+                aiSummaryText = res.exceptionOrNull()?.message ?: "获取会话总结失败"
+            }
+        }
+    }
+
     // Group info state for mute checking
     var groupInfo by remember { mutableStateOf<GroupInfoDto?>(null) }
     var myMemberInfo by remember { mutableStateOf<GroupMemberDto?>(null) }
@@ -116,47 +138,56 @@ fun ChatScreen(
     }
 
     LaunchedEffect(conversationId) {
+        chatRepo.syncRemoteMessages(conversationId)
         chatRepo.markConversationRead(conversationId)
     }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            scope.launch {
-                val tempFile = copyUriToTempFile(context, uri)
-                if (tempFile != null) {
-                    val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                    chatRepo.sendFileMessage(
-                        conversationId = conversationId,
-                        convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
-                        targetId = targetId,
-                        file = tempFile,
-                        mimeType = mimeType,
-                        quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
-                        quotedContent = replyingToMessage?.content ?: ""
-                    )
-                    replyingToMessage = null
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val tempFile = copyUriToTempFile(context, uri)
+            if (tempFile != null) {
+                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                val success = chatRepo.sendFileMessage(
+                    conversationId = conversationId,
+                    convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
+                    targetId = targetId,
+                    file = tempFile,
+                    mimeType = mimeType,
+                    quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
+                    quotedContent = replyingToMessage?.content ?: ""
+                )
+                if (!success) {
+                    Toast.makeText(context, "文件发送失败，请检查网络", Toast.LENGTH_SHORT).show()
                 }
+                replyingToMessage = null
+            } else {
+                Toast.makeText(context, "读取所选文件失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            scope.launch {
-                val tempFile = copyUriToTempFile(context, uri)
-                if (tempFile != null) {
-                    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-                    chatRepo.sendFileMessage(
-                        conversationId = conversationId,
-                        convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
-                        targetId = targetId,
-                        file = tempFile,
-                        mimeType = mimeType,
-                        quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
-                        quotedContent = replyingToMessage?.content ?: ""
-                    )
-                    replyingToMessage = null
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val tempFile = copyUriToTempFile(context, uri)
+            if (tempFile != null) {
+                val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+                val success = chatRepo.sendFileMessage(
+                    conversationId = conversationId,
+                    convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
+                    targetId = targetId,
+                    file = tempFile,
+                    mimeType = mimeType,
+                    quotedMsgId = replyingToMessage?.msgId?.toLongOrNull() ?: 0L,
+                    quotedContent = replyingToMessage?.content ?: ""
+                )
+                if (!success) {
+                    Toast.makeText(context, "图片发送失败，请检查网络", Toast.LENGTH_SHORT).show()
                 }
+                replyingToMessage = null
+            } else {
+                Toast.makeText(context, "读取所选图片失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -219,6 +250,34 @@ fun ChatScreen(
                                 )
                             )
                         }
+                    }
+
+                    if (!isGroup) {
+                        IconButton(onClick = { chatRepo.initiateCall(targetId, title, false) }) {
+                            Icon(
+                                imageVector = Icons.Default.Phone,
+                                contentDescription = "语音通话",
+                                tint = MimTheme.colors.textPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        IconButton(onClick = { chatRepo.initiateCall(targetId, title, true) }) {
+                            Icon(
+                                imageVector = Icons.Default.Videocam,
+                                contentDescription = "视频通话",
+                                tint = MimTheme.colors.textPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = { triggerAISummary() }) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "AI 智能纪要",
+                            tint = MimTheme.colors.accent
+                        )
                     }
 
                     if (isGroup) {
@@ -414,6 +473,14 @@ fun ChatScreen(
                                     filePicker.launch("*/*")
                                 }
                             )
+                            AttachmentOptionItem(
+                                icon = Icons.Default.AutoAwesome,
+                                label = "AI 纪要",
+                                onClick = {
+                                    showAttachmentSheet = false
+                                    triggerAISummary()
+                                }
+                            )
                         }
                     }
                 }
@@ -436,6 +503,7 @@ fun ChatScreen(
                     msg = msg,
                     isSelf = isSelf,
                     playerHelper = playerHelper,
+                    resolveMediaUrl = { chatRepo.resolveMediaUrl(it) },
                     onQuote = { entity -> replyingToMessage = entity },
                     onDownload = { entity, onProgress, onSuccess, onError ->
                         scope.launch {
@@ -472,6 +540,26 @@ fun ChatScreen(
             onGroupDisbandedOrQuit = {
                 showGroupSettings = false
                 onBack()
+            }
+        )
+    }
+
+    // AI Summary Sheet
+    if (showAISummarySheet) {
+        AISummarySheet(
+            summaryText = aiSummaryText,
+            analyzedCount = aiSummaryCount,
+            isLoading = isGeneratingSummary,
+            onDismiss = { showAISummarySheet = false },
+            onSendToChat = { textToSend ->
+                scope.launch {
+                    chatRepo.sendTextMessage(
+                        conversationId = conversationId,
+                        convType = if (isGroup) ConvType.GROUP else ConvType.SINGLE,
+                        targetId = targetId,
+                        text = textToSend
+                    )
+                }
             }
         )
     }
@@ -522,6 +610,7 @@ fun MessageBubbleItem(
     msg: MessageEntity,
     isSelf: Boolean,
     playerHelper: AudioPlayerHelper,
+    resolveMediaUrl: (String?) -> String = { it ?: "" },
     onQuote: (MessageEntity) -> Unit,
     onDownload: (MessageEntity, (Float) -> Unit, (File) -> Unit, (String) -> Unit) -> Unit,
     onRevoke: (MessageEntity) -> Unit,
@@ -677,7 +766,13 @@ fun MessageBubbleItem(
                                     progress = if (currentPlayingId == msg.msgId) progress else 0f,
                                     isSelf = isSelf,
                                     onTogglePlay = {
-                                        val mediaSource = msg.localFilePath ?: msg.mediaUrl ?: ""
+                                        val local = msg.localFilePath?.let { File(it) }
+                                        val mediaSource = if (local != null && local.exists()) {
+                                            local.absolutePath
+                                        } else {
+                                            val rawUrl = msg.mediaUrl.takeIf { !it.isNullOrBlank() } ?: msg.content
+                                            resolveMediaUrl(rawUrl)
+                                        }
                                         if (mediaSource.isNotBlank()) {
                                             playerHelper.playOrToggle(msg.msgId, mediaSource)
                                         }
@@ -685,13 +780,24 @@ fun MessageBubbleItem(
                                 )
                             }
                             "image" -> {
+                                val imageModel: Any? = remember(msg.localFilePath, msg.mediaUrl, msg.content) {
+                                    val local = msg.localFilePath?.let { File(it) }
+                                    if (local != null && local.exists()) {
+                                        local
+                                    } else {
+                                        val rawUrl = msg.mediaUrl.takeIf { !it.isNullOrBlank() } ?: msg.content
+                                        val resolved = resolveMediaUrl(rawUrl)
+                                        resolved.ifBlank { null }
+                                    }
+                                }
                                 AsyncImage(
-                                    model = msg.mediaUrl ?: msg.localFilePath,
+                                    model = imageModel,
                                     contentDescription = "图片",
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .heightIn(max = 200.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .heightIn(max = 240.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop
                                 )
                             }
                         }
@@ -749,7 +855,7 @@ fun MessageBubbleItem(
                         showMenu = false
                         onQuote(msg)
                     },
-                    leadingIcon = { Icon(Icons.Default.Reply, contentDescription = null, tint = MimTheme.colors.accent) }
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = MimTheme.colors.accent) }
                 )
 
                 // 2. Copy Text
@@ -813,25 +919,55 @@ private fun openDownloadedFile(context: Context, file: File) {
 private fun copyUriToTempFile(context: Context, uri: Uri): File? {
     return try {
         val resolver = context.contentResolver
-        var fileName = "mim_upload_${System.currentTimeMillis()}"
-        val cursor = resolver.query(uri, null, null, null, null)
-        cursor?.use {
-            if (it.moveToFirst()) {
-                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (nameIndex != -1) {
-                    fileName = it.getString(nameIndex)
+        var fileName: String? = null
+        try {
+            val cursor = resolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1) {
+                        fileName = it.getString(nameIndex)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ChatScreen", "Failed to query displayName for uri $uri", e)
+        }
+
+        if (fileName.isNullOrBlank()) {
+            fileName = "mim_file_${System.currentTimeMillis()}"
+        }
+
+        // Check if filename has an extension
+        val dotIndex = fileName!!.lastIndexOf('.')
+        if (dotIndex == -1 || dotIndex == fileName!!.length - 1) {
+            val mime = resolver.getType(uri)
+            if (mime != null) {
+                val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
+                if (!ext.isNullOrBlank()) {
+                    fileName = "$fileName.$ext"
                 }
             }
         }
 
-        val tempFile = File(context.cacheDir, fileName)
+        val cleanName = File(fileName!!).name
+        // Use a unique directory so cleanName remains unaltered without colliding
+        val uploadDir = File(File(context.cacheDir, "uploads"), UUID.randomUUID().toString()).apply { mkdirs() }
+        val tempFile = File(uploadDir, cleanName)
+
         resolver.openInputStream(uri)?.use { input ->
             FileOutputStream(tempFile).use { output ->
                 input.copyTo(output)
             }
+        } ?: return null
+
+        if (tempFile.exists() && tempFile.length() > 0) {
+            tempFile
+        } else {
+            null
         }
-        tempFile
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.e("ChatScreen", "copyUriToTempFile failed", e)
         null
     }
 }

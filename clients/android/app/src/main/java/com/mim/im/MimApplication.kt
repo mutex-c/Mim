@@ -23,6 +23,7 @@ class MimApplication : Application() {
     val preferencesHelper by lazy { PreferencesHelper(this) }
     val apiClient by lazy { ApiClient(preferencesHelper) }
     val wsManager by lazy { WsManager(preferencesHelper, apiClient) }
+    val webRtcManager by lazy { com.mim.im.webrtc.WebRtcManager(this) }
 
     val chatRepository by lazy {
         ChatRepository(
@@ -31,7 +32,8 @@ class MimApplication : Application() {
             apiClient = apiClient,
             wsManager = wsManager,
             messageDao = database.messageDao(),
-            conversationDao = database.conversationDao()
+            conversationDao = database.conversationDao(),
+            webRtcManager = webRtcManager
         )
     }
 

@@ -1,65 +1,67 @@
 <template>
   <Teleport to="body">
-    <div
-      v-if="dialogStore.visible"
-      class="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
-      @click.self="dialogStore.onCancel"
-    >
+    <Transition name="dialog-fade">
       <div
-        class="w-full max-w-sm rounded-2xl bg-mim-light-card dark:bg-mim-dark-card shadow-2xl border border-black/10 dark:border-white/10 p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-150"
+        v-if="dialogStore.visible"
+        class="dialog-overlay fixed inset-0 z-[10000] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 select-none"
+        @click.self="dialogStore.onCancel"
       >
-        <!-- Icon & Header -->
-        <div class="flex items-start gap-3.5">
-          <!-- Type Icon Pill -->
-          <div
-            class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-2xs"
-            :class="dialogStore.isDanger || dialogStore.type === 'danger'
-              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/25'
-              : dialogStore.type === 'warning'
-                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25'
-                : dialogStore.type === 'success'
-                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25'
-                  : 'bg-mim-accent-subtle text-mim-accent border border-mim-accent/25'"
-          >
-            <AlertTriangle v-if="dialogStore.isDanger || dialogStore.type === 'danger'" class="w-5 h-5 inline-icon" />
-            <AlertCircle v-else-if="dialogStore.type === 'warning'" class="w-5 h-5 inline-icon" />
-            <CheckCircle2 v-else-if="dialogStore.type === 'success'" class="w-5 h-5 inline-icon" />
-            <HelpCircle v-else class="w-5 h-5 inline-icon" />
+        <div
+          class="dialog-card w-full max-w-sm rounded-2xl bg-mim-light-card dark:bg-mim-dark-card shadow-2xl border border-black/10 dark:border-white/10 p-6 flex flex-col gap-4"
+        >
+          <!-- Icon & Header -->
+          <div class="flex items-start gap-3.5">
+            <!-- Type Icon Pill -->
+            <div
+              class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-2xs"
+              :class="dialogStore.isDanger || dialogStore.type === 'danger'
+                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/25'
+                : dialogStore.type === 'warning'
+                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25'
+                  : dialogStore.type === 'success'
+                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25'
+                    : 'bg-mim-accent-subtle text-mim-accent border border-mim-accent/25'"
+            >
+              <AlertTriangle v-if="dialogStore.isDanger || dialogStore.type === 'danger'" class="w-5 h-5 inline-icon" />
+              <AlertCircle v-else-if="dialogStore.type === 'warning'" class="w-5 h-5 inline-icon" />
+              <CheckCircle2 v-else-if="dialogStore.type === 'success'" class="w-5 h-5 inline-icon" />
+              <HelpCircle v-else class="w-5 h-5 inline-icon" />
+            </div>
+
+            <div class="flex-1 min-w-0 pt-0.5">
+              <h3 class="text-sm font-semibold text-mim-light-text dark:text-mim-dark-text leading-tight">
+                {{ dialogStore.title }}
+              </h3>
+              <p class="text-xs text-mim-light-muted dark:text-mim-dark-muted mt-1.5 leading-relaxed break-words whitespace-pre-wrap">
+                {{ dialogStore.message }}
+              </p>
+            </div>
           </div>
 
-          <div class="flex-1 min-w-0 pt-0.5">
-            <h3 class="text-sm font-semibold text-mim-light-text dark:text-mim-dark-text leading-tight">
-              {{ dialogStore.title }}
-            </h3>
-            <p class="text-xs text-mim-light-muted dark:text-mim-dark-muted mt-1.5 leading-relaxed break-words whitespace-pre-wrap">
-              {{ dialogStore.message }}
-            </p>
+          <!-- Buttons -->
+          <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-black/5 dark:border-white/5">
+            <button
+              v-if="dialogStore.isConfirm"
+              type="button"
+              @click="dialogStore.onCancel"
+              class="px-4 h-8 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 active:scale-[0.97] text-xs font-medium text-mim-light-text dark:text-mim-dark-text transition-[background-color,transform] duration-150 cursor-pointer"
+            >
+              {{ dialogStore.cancelText }}
+            </button>
+            <button
+              type="button"
+              @click="dialogStore.onConfirm"
+              class="px-5 h-8 rounded-xl text-xs font-semibold shadow-sm active:scale-[0.97] transition-[background-color,transform,box-shadow] duration-150 cursor-pointer"
+              :class="dialogStore.isDanger || dialogStore.type === 'danger'
+                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20'
+                : 'mim-btn-primary'"
+            >
+              {{ dialogStore.confirmText }}
+            </button>
           </div>
-        </div>
-
-        <!-- Buttons -->
-        <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-black/5 dark:border-white/5">
-          <button
-            v-if="dialogStore.isConfirm"
-            type="button"
-            @click="dialogStore.onCancel"
-            class="px-4 h-8 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-xs font-medium text-mim-light-text dark:text-mim-dark-text transition-colors"
-          >
-            {{ dialogStore.cancelText }}
-          </button>
-          <button
-            type="button"
-            @click="dialogStore.onConfirm"
-            class="px-5 h-8 rounded-xl text-xs font-semibold shadow-sm transition-all"
-            :class="dialogStore.isDanger || dialogStore.type === 'danger'
-              ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20'
-              : 'mim-btn-primary'"
-          >
-            {{ dialogStore.confirmText }}
-          </button>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -94,3 +96,37 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown);
 });
 </script>
+
+<style scoped>
+/* Dialog Backdrop & Scale Spring Motion (overlays/dialog spec) */
+.dialog-fade-enter-active {
+  transition: opacity 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dialog-fade-leave-active {
+  transition: opacity 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dialog-fade-enter-active .dialog-card {
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dialog-fade-leave-active .dialog-card {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dialog-fade-enter-from {
+  opacity: 0;
+}
+.dialog-fade-enter-from .dialog-card {
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+}
+
+.dialog-fade-leave-to {
+  opacity: 0;
+}
+.dialog-fade-leave-to .dialog-card {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+}
+</style>

@@ -10,12 +10,14 @@ export const FLAG_JSON = 1 << 2;
 export enum CmdType {
   HeartbeatPing = 0x0001,
   HeartbeatPong = 0x0002,
+  KickOut = 0x0006,
   AuthReq = 0x0010,
   AuthResp = 0x0011,
 
   ChatMessageSend = 0x0100,
   ChatMessagePush = 0x0101,
   MessageAck = 0x0102,
+  DeliveryAck = 0x0103,
 
   GroupMessageSend = 0x0200,
   GroupMessagePush = 0x0201,

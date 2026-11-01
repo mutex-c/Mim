@@ -13,10 +13,10 @@ interface ApiService {
     suspend fun login(@Body req: LoginRequest): Response<ApiResponse<LoginResponseData>>
 
     @GET("/api/auth/demo-users")
-    suspend fun getDemoUsers(): Response<ApiResponse<List<UserDto>>>
+    suspend fun getDemoUsers(): Response<ApiResponse<List<DemoUserDto>>>
 
     @GET("/api/user/profile")
-    suspend fun getProfile(): Response<ApiResponse<UserDto>>
+    suspend fun getProfile(): Response<ApiResponse<UserProfileRespDto>>
 
     @GET("/api/chat/conversations")
     suspend fun getConversations(): Response<ApiResponse<List<ConversationDto>>>
@@ -96,6 +96,12 @@ interface ApiService {
 
     @POST("/api/group/quit")
     suspend fun quitGroup(@Body req: GroupIdReq): Response<ApiResponse<Map<String, Any>>>
+
+    @POST("/api/ai/summary")
+    suspend fun getAISummary(@Body req: AISummaryReq): Response<ApiResponse<AISummaryResp>>
+
+    @GET("/api/calls/history")
+    suspend fun getCallHistory(@Query("user_id") userId: Long): Response<ApiResponse<List<CallHistoryItemDto>>>
 
     @Multipart
     @POST("/api/file/upload")

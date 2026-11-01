@@ -81,5 +81,9 @@ dependencies {
     // Coil Image Loader
     implementation(libs.coil.compose)
 
+    // WebRTC Native Engine
+    implementation(libs.stream.webrtc)
+    implementation(libs.stream.webrtc.compose)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

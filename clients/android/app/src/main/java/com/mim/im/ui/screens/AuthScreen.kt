@@ -52,12 +52,12 @@ fun AuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showServerConfig by remember { mutableStateOf(false) }
-    var demoUsers by remember { mutableStateOf<List<UserDto>>(emptyList()) }
+    var demoUsersWithTokens by remember { mutableStateOf<List<com.mim.im.data.model.DemoUserDto>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         scope.launch {
-            authRepo.getDemoUsers().onSuccess {
-                demoUsers = it
+            authRepo.getDemoUsersWithTokens().onSuccess {
+                demoUsersWithTokens = it
             }
         }
     }
@@ -422,11 +422,11 @@ fun AuthScreen(
 
             // --- Quick Demo Login Section ---
             if (selectedTab == 0) {
-                val demoList = if (demoUsers.isNotEmpty()) demoUsers else listOf(
-                    UserDto(id = 1, account = "alex", nickname = "Alex Chen", avatar = "", signature = "", role = 1),
-                    UserDto(id = 2, account = "sarah", nickname = "Sarah Jenkins", avatar = "", signature = "", role = 1),
-                    UserDto(id = 3, account = "michael", nickname = "Michael Zhang", avatar = "", signature = "", role = 1),
-                    UserDto(id = 4, account = "david", nickname = "David Miller", avatar = "", signature = "", role = 1)
+                val demoList = if (demoUsersWithTokens.isNotEmpty()) demoUsersWithTokens else listOf(
+                    com.mim.im.data.model.DemoUserDto(UserDto(id = 1, account = "alex", nickname = "Alex Chen"), com.mim.im.data.model.TokenPairDto()),
+                    com.mim.im.data.model.DemoUserDto(UserDto(id = 2, account = "sarah", nickname = "Sarah Jenkins"), com.mim.im.data.model.TokenPairDto()),
+                    com.mim.im.data.model.DemoUserDto(UserDto(id = 3, account = "michael", nickname = "Michael Zhang"), com.mim.im.data.model.TokenPairDto()),
+                    com.mim.im.data.model.DemoUserDto(UserDto(id = 4, account = "david", nickname = "David Miller"), com.mim.im.data.model.TokenPairDto())
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -448,27 +448,26 @@ fun AuthScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(demoList) { user ->
+                    items(demoList) { item ->
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = MimTheme.colors.surfaceElevated,
                             modifier = Modifier
                                 .border(1.dp, MimTheme.colors.border, RoundedCornerShape(12.dp))
                                 .clickable {
-                                    account = user.account
-                                    password = "password123"
-                                    scope.launch {
-                                        isLoading = true
-                                        val res = authRepo.login(user.account, "password123")
-                                        if (res.isFailure) {
-                                            // Fallback attempt with "123456"
-                                            val res2 = authRepo.login(user.account, "123456")
+                                    account = item.user.account
+                                    password = "123456"
+                                    if (item.token.accessToken.isNotBlank()) {
+                                        // Instant zero-latency login using pre-minted token
+                                        authRepo.loginWithToken(item.user, item.token.accessToken)
+                                        onAuthSuccess()
+                                    } else {
+                                        scope.launch {
+                                            isLoading = true
+                                            val res = authRepo.login(item.user.account, "123456")
                                             isLoading = false
-                                            res2.onSuccess { onAuthSuccess() }
+                                            res.onSuccess { onAuthSuccess() }
                                                 .onFailure { errorMessage = it.message ?: "登录失败" }
-                                        } else {
-                                            isLoading = false
-                                            onAuthSuccess()
                                         }
                                     }
                                 }
@@ -478,13 +477,13 @@ fun AuthScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 MimAvatar(
-                                    name = user.nickname,
+                                    name = item.user.nickname,
                                     size = 28.dp
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
                                     Text(
-                                        text = user.nickname,
+                                        text = item.user.nickname,
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontWeight = FontWeight.Bold,
                                             color = MimTheme.colors.textPrimary

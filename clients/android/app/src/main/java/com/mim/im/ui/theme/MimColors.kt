@@ -5,7 +5,8 @@ import androidx.compose.ui.graphics.Color
 enum class ColorPalette(val id: String, val nameZh: String, val nameEn: String, val previewColor: Color) {
     PINE("pine", "松风墨翠", "Nordic Forest Pine", Color(0xFF1E5243)),
     PETROL("petrol", "沧浪深黛", "Baltic Sea Petrol", Color(0xFF1E4555)),
-    OBSIDIAN("obsidian", "黑曜暖琥", "Obsidian & Amber", Color(0xFF8C4C1B));
+    OBSIDIAN("obsidian", "黑曜暖琥", "Obsidian & Amber", Color(0xFF8C4C1B)),
+    GENSHIN("genshin", "提瓦特星穹 · 原神", "Teyvat Starlight · Genshin", Color(0xFFE5B044));
 
     companion object {
         fun fromId(id: String): ColorPalette = entries.firstOrNull { it.id == id } ?: PINE
@@ -145,10 +146,45 @@ val ObsidianDarkColors = MimColors(
     isDark = true
 )
 
+val GenshinLightColors = MimColors(
+    background = Color(0xFFEEE9DC),
+    surface = Color(0xFFFAF8F2),
+    surfaceElevated = Color(0xFFFFFFFF),
+    border = Color(0xFFE2D9C4),
+    textPrimary = Color(0xFF26211A),
+    textMuted = Color(0xFF786F62),
+    accent = Color(0xFFC48B26),
+    accentSubtle = Color(0x24C48B26),
+    bubbleSelf = Color(0xFFC48B26),
+    bubbleSelfText = Color(0xFFFFFFFF),
+    bubblePeer = Color(0xFFFFFFFF),
+    bubblePeerText = Color(0xFF26211A),
+    inputBackground = Color(0xFFFFFFFF),
+    isDark = false
+)
+
+val GenshinDarkColors = MimColors(
+    background = Color(0xFF0C111E),
+    surface = Color(0xFF0F1524),
+    surfaceElevated = Color(0xFF161E33),
+    border = Color(0x33E5B044),
+    textPrimary = Color(0xFFF0F4FC),
+    textMuted = Color(0xFF828EA6),
+    accent = Color(0xFFE5B044),
+    accentSubtle = Color(0x38E5B044),
+    bubbleSelf = Color(0xFF19233C),
+    bubbleSelfText = Color(0xFFFEF8EB),
+    bubblePeer = Color(0xFF131B2E),
+    bubblePeerText = Color(0xFFF0F4FC),
+    inputBackground = Color(0xFF161E33),
+    isDark = true
+)
+
 fun getMimColors(palette: ColorPalette, darkTheme: Boolean): MimColors {
     return when (palette) {
         ColorPalette.PINE -> if (darkTheme) PineDarkColors else PineLightColors
         ColorPalette.PETROL -> if (darkTheme) PetrolDarkColors else PetrolLightColors
         ColorPalette.OBSIDIAN -> if (darkTheme) ObsidianDarkColors else ObsidianLightColors
+        ColorPalette.GENSHIN -> if (darkTheme) GenshinDarkColors else GenshinLightColors
     }
 }

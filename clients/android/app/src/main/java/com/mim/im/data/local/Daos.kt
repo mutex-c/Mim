@@ -17,6 +17,9 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE accountOwnerId = :accountOwnerId AND msgId = :msgId")
     suspend fun updateStatus(accountOwnerId: String, msgId: String, status: String)
 
+    @Query("DELETE FROM messages WHERE accountOwnerId = :accountOwnerId AND msgId = :msgId")
+    suspend fun deleteMessage(accountOwnerId: String, msgId: String)
+
     @Query("UPDATE messages SET isDownloaded = :isDownloaded, localFilePath = :localPath WHERE accountOwnerId = :accountOwnerId AND msgId = :msgId")
     suspend fun updateDownloadStatus(accountOwnerId: String, msgId: String, isDownloaded: Boolean, localPath: String)
 
@@ -25,6 +28,9 @@ interface MessageDao {
 
     @Query("SELECT MAX(seq) FROM messages WHERE accountOwnerId = :accountOwnerId")
     suspend fun getMaxSeq(accountOwnerId: String): Long?
+
+    @Query("SELECT MAX(seq) FROM messages WHERE accountOwnerId = :accountOwnerId AND conversationId = :conversationId")
+    suspend fun getMaxSeqByConversation(accountOwnerId: String, conversationId: String): Long?
 
     @Query("SELECT * FROM messages WHERE accountOwnerId = :accountOwnerId AND msgId = :msgId LIMIT 1")
     suspend fun getMessageById(accountOwnerId: String, msgId: String): MessageEntity?
@@ -40,6 +46,9 @@ interface ConversationDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(conversation: ConversationEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(conversations: List<ConversationEntity>)
 
     @Query("UPDATE conversations SET unreadCount = 0 WHERE accountOwnerId = :accountOwnerId AND id = :id")
     suspend fun clearUnread(accountOwnerId: String, id: String)

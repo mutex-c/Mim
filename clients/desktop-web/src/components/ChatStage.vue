@@ -151,7 +151,7 @@
           <div
             v-for="msg in chatStore.activeMessages"
             :key="msg.id"
-            class="flex flex-col group relative"
+            class="flex flex-col group relative msg-enter"
             :class="msg.isRevoked || msg.msgType === 'revoke' ? 'items-center my-2' : (msg.isMe ? 'items-end' : 'items-start')"
           >
           <!-- Revoked Notice Pill (Centered, minimal, sleek WeChat/Slack-style capsule) -->
@@ -893,7 +893,7 @@
             <button
               @click="handleSend"
               :disabled="!inputContent.trim() || isMutedInGroup"
-              class="px-4 h-8 rounded-lg disabled:opacity-40 text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:cursor-not-allowed transition-all border-0"
+              class="px-4 h-8 rounded-lg disabled:opacity-40 text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:cursor-not-allowed transition-[background-color,transform,box-shadow] duration-150 active:scale-95 border-0"
               :class="themeStore.currentPalette === 'vodyanitsa'
                 ? 'bg-gradient-to-r from-sky-500 to-cyan-400 hover:from-sky-400 hover:to-cyan-300 text-white shadow-[0_0_12px_rgba(56,189,248,0.5)] border border-cyan-200/50'
                 : 'mim-btn-primary !border-0'"
@@ -920,10 +920,11 @@
     </div>
 
     <!-- RIGHT GROUP DRAWER (Aligned with ui_group.png & proto_2.png) -->
-    <aside
-      v-if="isGroup && showGroupDrawer"
-      class="w-72 h-full bg-mim-light-list dark:bg-mim-dark-list border-l border-black/[0.04] dark:border-white/[0.04] flex flex-col shrink-0 select-none z-10"
-    >
+    <Transition name="drawer-right">
+      <aside
+        v-if="isGroup && showGroupDrawer"
+        class="w-72 h-full bg-mim-light-list dark:bg-mim-dark-list border-l border-black/[0.04] dark:border-white/[0.04] flex flex-col shrink-0 select-none z-10"
+      >
       <!-- Drawer Section 1: 群通知 (ui_group.png) -->
       <div class="p-4 border-b border-black/[0.04] dark:border-white/[0.04] space-y-2">
         <div class="flex items-center justify-between">
@@ -1037,6 +1038,7 @@
         </div>
       </div>
     </aside>
+  </Transition>
 
     <!-- Member Context Popup Menu (ui_group.png) -->
     <div
@@ -2832,5 +2834,40 @@ onUnmounted(() => {
 .fade-leave-to {
   opacity: 0;
   transform: translateY(6px);
+}
+
+/* Drawer slide from right (overlays/drawer spec) */
+.drawer-right-enter-active {
+  transition: width 240ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+.drawer-right-leave-active {
+  transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 160ms cubic-bezier(0.22, 1, 0.36, 1),
+              transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+}
+.drawer-right-enter-from,
+.drawer-right-leave-to {
+  width: 0 !important;
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+/* Message subtle float in */
+.msg-enter {
+  animation: msgEntrance 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes msgEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>
