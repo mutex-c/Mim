@@ -11,7 +11,7 @@ services:
     container_name: mim-server
     restart: "no"
     ports:
-      - "8080:8080"
+      - "${MIM_PORT:-8088}:8080"
     volumes:
       - ../../mim.db:/app/mim.db
       - ../../uploads:/app/uploads
@@ -21,6 +21,9 @@ services:
     environment:
       - MIM_REDIS_ADDR=redis:6379
       - MIM_REDIS_PASSWORD=${REDIS_PASSWORD:-mim_redis_pass_2026}
+    profiles:
+      - monolith
+      - standalone
     networks:
       - mim-net
 
