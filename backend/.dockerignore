@@ -1,0 +1,12 @@
+.git
+.idea
+*.exe
+*.exe~
+*.log
+*.db
+*.db-shm
+*.db-wal
+dump.rdb
+uploads/
+scratch/
+bin/
