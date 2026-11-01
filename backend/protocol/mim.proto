@@ -47,6 +47,7 @@ message ChatMessage {
   uint64 seq_id = 10;           // 会话内连续单调递增序号
   int64 send_time = 11;         // 毫秒时间戳
   bool is_encrypted = 12;       // 是否端到端加密
+  string sender_device_id = 13; // 发送设备ID (用于多端同步排除回显)
 }
 
 // 客户端投递确认 ACK
@@ -93,4 +94,91 @@ message AuthHandshake {
   string token = 1;
   string platform = 2;          // web, windows, android
   string device_id = 3;
+}
+
+// 互踢下线通知 (FR-AUTH-03)
+message KickOutNotify {
+  uint32 code = 1;              // 状态码 (例如 4001: 账号在另一台设备登录)
+  string reason = 2;            // 互踢原因描述
+  string new_device_id = 3;     // 挤掉当前连接的新设备ID
+  int64 kick_time = 4;          // 互踢时间戳 (ms)
+}
+
+// 已读回执 (CmdReadReceipt 0x0401)
+message ReadReceipt {
+  string conversation_id = 1;   // 会话ID
+  uint64 user_id = 2;           // 已读者ID
+  uint64 read_seq_id = 3;       // 客户端已读的最大 SeqID
+  int64 read_time = 4;          // 已读时间戳 (ms)
+}
+
+// 客户端送达确认 ACK (CmdDeliveryAck 0x0103)
+message DeliveryAck {
+  string client_msg_id = 1;     // 客户端消息唯一ID
+  uint64 msg_id = 2;            // 服务端分配的全局消息ID
+  string conversation_id = 3;   // 会话ID
+  uint64 seq_id = 4;            // 消息 SeqID
+  int64 delivery_time = 5;      // 接收端送达时间戳 (ms)
+}
+
+// ==========================================
+// 分布式微服务 gRPC 服务契约 (阶段二)
+// ==========================================
+
+// 网关调用 Logic 业务集群服务
+service LogicService {
+  rpc SendMessage(ChatMessage) returns (MessageAck);
+  rpc SyncMessages(SyncRequest) returns (SyncResponse);
+  rpc ProcessDeliveryAck(DeliveryAck) returns (MessageAck);
+  rpc ProcessReadReceipt(ReadReceipt) returns (MessageAck);
+  rpc RouteWebRTCSignal(WebRTCSignal) returns (WebRTCSignalResp);
+  rpc VerifyToken(AuthHandshake) returns (AuthHandshakeResp);
+}
+
+message WebRTCSignalResp {
+  bool success = 1;
+}
+
+message AuthHandshakeResp {
+  bool valid = 1;
+  uint64 user_id = 2;
+  string error = 3;
+}
+
+// Logic / Transfer 服务调用网关长连接推送服务
+service GatewayService {
+  rpc PushMessage(GatewayPushReq) returns (GatewayPushResp);
+  rpc KickDevice(GatewayKickReq) returns (GatewayKickResp);
+  rpc Broadcast(GatewayBroadcastReq) returns (GatewayBroadcastResp);
+}
+
+message GatewayPushReq {
+  uint64 user_id = 1;
+  bytes frame_bytes = 2;
+  string exclude_device_id = 3;
+}
+
+message GatewayPushResp {
+  bool delivered = 1;
+  int32 target_device_count = 2;
+}
+
+message GatewayKickReq {
+  uint64 user_id = 1;
+  string platform = 2;
+  string new_device_id = 3;
+  string reason = 4;
+}
+
+message GatewayKickResp {
+  bool kicked = 1;
+}
+
+message GatewayBroadcastReq {
+  repeated uint64 user_ids = 1;
+  bytes frame_bytes = 2;
+}
+
+message GatewayBroadcastResp {
+  int32 sent_count = 1;
 }

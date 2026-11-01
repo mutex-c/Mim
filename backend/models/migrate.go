@@ -16,6 +16,7 @@ func AllModels() []interface{} {
 		&Group{},
 		&GroupMember{},
 		&FileRecord{},
+		&CallRecord{},
 	}
 }
 

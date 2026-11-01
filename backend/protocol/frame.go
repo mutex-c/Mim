@@ -19,12 +19,14 @@ const (
 	// Command Types
 	CmdHeartbeatPing uint16 = 0x0001
 	CmdHeartbeatPong uint16 = 0x0002
+	CmdKickOut       uint16 = 0x0006 // FR-AUTH-03: Multi-device same platform kickout
 	CmdAuthReq       uint16 = 0x0010
 	CmdAuthResp      uint16 = 0x0011
 
 	CmdChatMessageSend uint16 = 0x0100
 	CmdChatMessagePush uint16 = 0x0101
 	CmdMessageAck      uint16 = 0x0102
+	CmdDeliveryAck     uint16 = 0x0103 // Client ACK receipt on message arrival
 
 	CmdGroupMessageSend uint16 = 0x0200
 	CmdGroupMessagePush uint16 = 0x0201

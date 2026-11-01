@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        v4.25.3
-// source: mim.proto
+// source: protocol/mim.proto
 
 package protocol
 
@@ -76,11 +76,11 @@ func (x MessageType) String() string {
 }
 
 func (MessageType) Descriptor() protoreflect.EnumDescriptor {
-	return file_mim_proto_enumTypes[0].Descriptor()
+	return file_protocol_mim_proto_enumTypes[0].Descriptor()
 }
 
 func (MessageType) Type() protoreflect.EnumType {
-	return &file_mim_proto_enumTypes[0]
+	return &file_protocol_mim_proto_enumTypes[0]
 }
 
 func (x MessageType) Number() protoreflect.EnumNumber {
@@ -89,7 +89,7 @@ func (x MessageType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MessageType.Descriptor instead.
 func (MessageType) EnumDescriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{0}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{0}
 }
 
 // 会话类型
@@ -123,11 +123,11 @@ func (x ConversationType) String() string {
 }
 
 func (ConversationType) Descriptor() protoreflect.EnumDescriptor {
-	return file_mim_proto_enumTypes[1].Descriptor()
+	return file_protocol_mim_proto_enumTypes[1].Descriptor()
 }
 
 func (ConversationType) Type() protoreflect.EnumType {
-	return &file_mim_proto_enumTypes[1]
+	return &file_protocol_mim_proto_enumTypes[1]
 }
 
 func (x ConversationType) Number() protoreflect.EnumNumber {
@@ -136,7 +136,7 @@ func (x ConversationType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ConversationType.Descriptor instead.
 func (ConversationType) EnumDescriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{1}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{1}
 }
 
 // 引用与回复元数据
@@ -153,7 +153,7 @@ type QuoteInfo struct {
 
 func (x *QuoteInfo) Reset() {
 	*x = QuoteInfo{}
-	mi := &file_mim_proto_msgTypes[0]
+	mi := &file_protocol_mim_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -165,7 +165,7 @@ func (x *QuoteInfo) String() string {
 func (*QuoteInfo) ProtoMessage() {}
 
 func (x *QuoteInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[0]
+	mi := &file_protocol_mim_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -178,7 +178,7 @@ func (x *QuoteInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuoteInfo.ProtoReflect.Descriptor instead.
 func (*QuoteInfo) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{0}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *QuoteInfo) GetQuotedMsgId() uint64 {
@@ -226,18 +226,19 @@ type ChatMessage struct {
 	SenderId       uint64                 `protobuf:"varint,5,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
 	ReceiverId     uint64                 `protobuf:"varint,6,opt,name=receiver_id,json=receiverId,proto3" json:"receiver_id,omitempty"` // 单聊为接收方用户ID，群聊为0
 	MsgType        MessageType            `protobuf:"varint,7,opt,name=msg_type,json=msgType,proto3,enum=mim.protocol.MessageType" json:"msg_type,omitempty"`
-	Content        string                 `protobuf:"bytes,8,opt,name=content,proto3" json:"content,omitempty"`                              // 消息内容 (纯文本或媒体结构体JSON)
-	Quote          *QuoteInfo             `protobuf:"bytes,9,opt,name=quote,proto3" json:"quote,omitempty"`                                  // 引用父消息
-	SeqId          uint64                 `protobuf:"varint,10,opt,name=seq_id,json=seqId,proto3" json:"seq_id,omitempty"`                   // 会话内连续单调递增序号
-	SendTime       int64                  `protobuf:"varint,11,opt,name=send_time,json=sendTime,proto3" json:"send_time,omitempty"`          // 毫秒时间戳
-	IsEncrypted    bool                   `protobuf:"varint,12,opt,name=is_encrypted,json=isEncrypted,proto3" json:"is_encrypted,omitempty"` // 是否端到端加密
+	Content        string                 `protobuf:"bytes,8,opt,name=content,proto3" json:"content,omitempty"`                                        // 消息内容 (纯文本或媒体结构体JSON)
+	Quote          *QuoteInfo             `protobuf:"bytes,9,opt,name=quote,proto3" json:"quote,omitempty"`                                            // 引用父消息
+	SeqId          uint64                 `protobuf:"varint,10,opt,name=seq_id,json=seqId,proto3" json:"seq_id,omitempty"`                             // 会话内连续单调递增序号
+	SendTime       int64                  `protobuf:"varint,11,opt,name=send_time,json=sendTime,proto3" json:"send_time,omitempty"`                    // 毫秒时间戳
+	IsEncrypted    bool                   `protobuf:"varint,12,opt,name=is_encrypted,json=isEncrypted,proto3" json:"is_encrypted,omitempty"`           // 是否端到端加密
+	SenderDeviceId string                 `protobuf:"bytes,13,opt,name=sender_device_id,json=senderDeviceId,proto3" json:"sender_device_id,omitempty"` // 发送设备ID (用于多端同步排除回显)
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ChatMessage) Reset() {
 	*x = ChatMessage{}
-	mi := &file_mim_proto_msgTypes[1]
+	mi := &file_protocol_mim_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -249,7 +250,7 @@ func (x *ChatMessage) String() string {
 func (*ChatMessage) ProtoMessage() {}
 
 func (x *ChatMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[1]
+	mi := &file_protocol_mim_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -262,7 +263,7 @@ func (x *ChatMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessage.ProtoReflect.Descriptor instead.
 func (*ChatMessage) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{1}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ChatMessage) GetMsgId() uint64 {
@@ -349,6 +350,13 @@ func (x *ChatMessage) GetIsEncrypted() bool {
 	return false
 }
 
+func (x *ChatMessage) GetSenderDeviceId() string {
+	if x != nil {
+		return x.SenderDeviceId
+	}
+	return ""
+}
+
 // 客户端投递确认 ACK
 type MessageAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -364,7 +372,7 @@ type MessageAck struct {
 
 func (x *MessageAck) Reset() {
 	*x = MessageAck{}
-	mi := &file_mim_proto_msgTypes[2]
+	mi := &file_protocol_mim_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -376,7 +384,7 @@ func (x *MessageAck) String() string {
 func (*MessageAck) ProtoMessage() {}
 
 func (x *MessageAck) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[2]
+	mi := &file_protocol_mim_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -389,7 +397,7 @@ func (x *MessageAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageAck.ProtoReflect.Descriptor instead.
 func (*MessageAck) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{2}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *MessageAck) GetClientMsgId() string {
@@ -446,7 +454,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_mim_proto_msgTypes[3]
+	mi := &file_protocol_mim_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -458,7 +466,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[3]
+	mi := &file_protocol_mim_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -471,7 +479,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{3}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SyncRequest) GetConversationId() string {
@@ -508,7 +516,7 @@ type SyncResponse struct {
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_mim_proto_msgTypes[4]
+	mi := &file_protocol_mim_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -520,7 +528,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[4]
+	mi := &file_protocol_mim_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -533,7 +541,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{4}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SyncResponse) GetConversationId() string {
@@ -578,7 +586,7 @@ type WebRTCSignal struct {
 
 func (x *WebRTCSignal) Reset() {
 	*x = WebRTCSignal{}
-	mi := &file_mim_proto_msgTypes[5]
+	mi := &file_protocol_mim_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +598,7 @@ func (x *WebRTCSignal) String() string {
 func (*WebRTCSignal) ProtoMessage() {}
 
 func (x *WebRTCSignal) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[5]
+	mi := &file_protocol_mim_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +611,7 @@ func (x *WebRTCSignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebRTCSignal.ProtoReflect.Descriptor instead.
 func (*WebRTCSignal) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{5}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WebRTCSignal) GetCallId() string {
@@ -651,7 +659,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_mim_proto_msgTypes[6]
+	mi := &file_protocol_mim_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +671,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[6]
+	mi := &file_protocol_mim_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +684,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{6}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Heartbeat) GetTimestamp() int64 {
@@ -698,7 +706,7 @@ type AuthHandshake struct {
 
 func (x *AuthHandshake) Reset() {
 	*x = AuthHandshake{}
-	mi := &file_mim_proto_msgTypes[7]
+	mi := &file_protocol_mim_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -710,7 +718,7 @@ func (x *AuthHandshake) String() string {
 func (*AuthHandshake) ProtoMessage() {}
 
 func (x *AuthHandshake) ProtoReflect() protoreflect.Message {
-	mi := &file_mim_proto_msgTypes[7]
+	mi := &file_protocol_mim_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -723,7 +731,7 @@ func (x *AuthHandshake) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthHandshake.ProtoReflect.Descriptor instead.
 func (*AuthHandshake) Descriptor() ([]byte, []int) {
-	return file_mim_proto_rawDescGZIP(), []int{7}
+	return file_protocol_mim_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AuthHandshake) GetToken() string {
@@ -747,17 +755,656 @@ func (x *AuthHandshake) GetDeviceId() string {
 	return ""
 }
 
-var File_mim_proto protoreflect.FileDescriptor
+// 互踢下线通知 (FR-AUTH-03)
+type KickOutNotify struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`                                   // 状态码 (例如 4001: 账号在另一台设备登录)
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`                                // 互踢原因描述
+	NewDeviceId   string                 `protobuf:"bytes,3,opt,name=new_device_id,json=newDeviceId,proto3" json:"new_device_id,omitempty"` // 挤掉当前连接的新设备ID
+	KickTime      int64                  `protobuf:"varint,4,opt,name=kick_time,json=kickTime,proto3" json:"kick_time,omitempty"`           // 互踢时间戳 (ms)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_mim_proto_rawDesc = "" +
+func (x *KickOutNotify) Reset() {
+	*x = KickOutNotify{}
+	mi := &file_protocol_mim_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KickOutNotify) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KickOutNotify) ProtoMessage() {}
+
+func (x *KickOutNotify) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KickOutNotify.ProtoReflect.Descriptor instead.
+func (*KickOutNotify) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *KickOutNotify) GetCode() uint32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *KickOutNotify) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *KickOutNotify) GetNewDeviceId() string {
+	if x != nil {
+		return x.NewDeviceId
+	}
+	return ""
+}
+
+func (x *KickOutNotify) GetKickTime() int64 {
+	if x != nil {
+		return x.KickTime
+	}
+	return 0
+}
+
+// 已读回执 (CmdReadReceipt 0x0401)
+type ReadReceipt struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ConversationId string                 `protobuf:"bytes,1,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // 会话ID
+	UserId         uint64                 `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                        // 已读者ID
+	ReadSeqId      uint64                 `protobuf:"varint,3,opt,name=read_seq_id,json=readSeqId,proto3" json:"read_seq_id,omitempty"`             // 客户端已读的最大 SeqID
+	ReadTime       int64                  `protobuf:"varint,4,opt,name=read_time,json=readTime,proto3" json:"read_time,omitempty"`                  // 已读时间戳 (ms)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReadReceipt) Reset() {
+	*x = ReadReceipt{}
+	mi := &file_protocol_mim_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadReceipt) ProtoMessage() {}
+
+func (x *ReadReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadReceipt.ProtoReflect.Descriptor instead.
+func (*ReadReceipt) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ReadReceipt) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *ReadReceipt) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ReadReceipt) GetReadSeqId() uint64 {
+	if x != nil {
+		return x.ReadSeqId
+	}
+	return 0
+}
+
+func (x *ReadReceipt) GetReadTime() int64 {
+	if x != nil {
+		return x.ReadTime
+	}
+	return 0
+}
+
+// 客户端送达确认 ACK (CmdDeliveryAck 0x0103)
+type DeliveryAck struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ClientMsgId    string                 `protobuf:"bytes,1,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`        // 客户端消息唯一ID
+	MsgId          uint64                 `protobuf:"varint,2,opt,name=msg_id,json=msgId,proto3" json:"msg_id,omitempty"`                           // 服务端分配的全局消息ID
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // 会话ID
+	SeqId          uint64                 `protobuf:"varint,4,opt,name=seq_id,json=seqId,proto3" json:"seq_id,omitempty"`                           // 消息 SeqID
+	DeliveryTime   int64                  `protobuf:"varint,5,opt,name=delivery_time,json=deliveryTime,proto3" json:"delivery_time,omitempty"`      // 接收端送达时间戳 (ms)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DeliveryAck) Reset() {
+	*x = DeliveryAck{}
+	mi := &file_protocol_mim_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeliveryAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeliveryAck) ProtoMessage() {}
+
+func (x *DeliveryAck) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeliveryAck.ProtoReflect.Descriptor instead.
+func (*DeliveryAck) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DeliveryAck) GetClientMsgId() string {
+	if x != nil {
+		return x.ClientMsgId
+	}
+	return ""
+}
+
+func (x *DeliveryAck) GetMsgId() uint64 {
+	if x != nil {
+		return x.MsgId
+	}
+	return 0
+}
+
+func (x *DeliveryAck) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *DeliveryAck) GetSeqId() uint64 {
+	if x != nil {
+		return x.SeqId
+	}
+	return 0
+}
+
+func (x *DeliveryAck) GetDeliveryTime() int64 {
+	if x != nil {
+		return x.DeliveryTime
+	}
+	return 0
+}
+
+type WebRTCSignalResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WebRTCSignalResp) Reset() {
+	*x = WebRTCSignalResp{}
+	mi := &file_protocol_mim_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WebRTCSignalResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WebRTCSignalResp) ProtoMessage() {}
+
+func (x *WebRTCSignalResp) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WebRTCSignalResp.ProtoReflect.Descriptor instead.
+func (*WebRTCSignalResp) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *WebRTCSignalResp) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type AuthHandshakeResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
+	UserId        uint64                 `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthHandshakeResp) Reset() {
+	*x = AuthHandshakeResp{}
+	mi := &file_protocol_mim_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthHandshakeResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthHandshakeResp) ProtoMessage() {}
+
+func (x *AuthHandshakeResp) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthHandshakeResp.ProtoReflect.Descriptor instead.
+func (*AuthHandshakeResp) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AuthHandshakeResp) GetValid() bool {
+	if x != nil {
+		return x.Valid
+	}
+	return false
+}
+
+func (x *AuthHandshakeResp) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *AuthHandshakeResp) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type GatewayPushReq struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	UserId          uint64                 `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	FrameBytes      []byte                 `protobuf:"bytes,2,opt,name=frame_bytes,json=frameBytes,proto3" json:"frame_bytes,omitempty"`
+	ExcludeDeviceId string                 `protobuf:"bytes,3,opt,name=exclude_device_id,json=excludeDeviceId,proto3" json:"exclude_device_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *GatewayPushReq) Reset() {
+	*x = GatewayPushReq{}
+	mi := &file_protocol_mim_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatewayPushReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatewayPushReq) ProtoMessage() {}
+
+func (x *GatewayPushReq) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatewayPushReq.ProtoReflect.Descriptor instead.
+func (*GatewayPushReq) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GatewayPushReq) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *GatewayPushReq) GetFrameBytes() []byte {
+	if x != nil {
+		return x.FrameBytes
+	}
+	return nil
+}
+
+func (x *GatewayPushReq) GetExcludeDeviceId() string {
+	if x != nil {
+		return x.ExcludeDeviceId
+	}
+	return ""
+}
+
+type GatewayPushResp struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Delivered         bool                   `protobuf:"varint,1,opt,name=delivered,proto3" json:"delivered,omitempty"`
+	TargetDeviceCount int32                  `protobuf:"varint,2,opt,name=target_device_count,json=targetDeviceCount,proto3" json:"target_device_count,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *GatewayPushResp) Reset() {
+	*x = GatewayPushResp{}
+	mi := &file_protocol_mim_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatewayPushResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatewayPushResp) ProtoMessage() {}
+
+func (x *GatewayPushResp) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatewayPushResp.ProtoReflect.Descriptor instead.
+func (*GatewayPushResp) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GatewayPushResp) GetDelivered() bool {
+	if x != nil {
+		return x.Delivered
+	}
+	return false
+}
+
+func (x *GatewayPushResp) GetTargetDeviceCount() int32 {
+	if x != nil {
+		return x.TargetDeviceCount
+	}
+	return 0
+}
+
+type GatewayKickReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        uint64                 `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`
+	NewDeviceId   string                 `protobuf:"bytes,3,opt,name=new_device_id,json=newDeviceId,proto3" json:"new_device_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GatewayKickReq) Reset() {
+	*x = GatewayKickReq{}
+	mi := &file_protocol_mim_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatewayKickReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatewayKickReq) ProtoMessage() {}
+
+func (x *GatewayKickReq) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatewayKickReq.ProtoReflect.Descriptor instead.
+func (*GatewayKickReq) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GatewayKickReq) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *GatewayKickReq) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *GatewayKickReq) GetNewDeviceId() string {
+	if x != nil {
+		return x.NewDeviceId
+	}
+	return ""
+}
+
+func (x *GatewayKickReq) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type GatewayKickResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kicked        bool                   `protobuf:"varint,1,opt,name=kicked,proto3" json:"kicked,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GatewayKickResp) Reset() {
+	*x = GatewayKickResp{}
+	mi := &file_protocol_mim_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatewayKickResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatewayKickResp) ProtoMessage() {}
+
+func (x *GatewayKickResp) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatewayKickResp.ProtoReflect.Descriptor instead.
+func (*GatewayKickResp) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GatewayKickResp) GetKicked() bool {
+	if x != nil {
+		return x.Kicked
+	}
+	return false
+}
+
+type GatewayBroadcastReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserIds       []uint64               `protobuf:"varint,1,rep,packed,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	FrameBytes    []byte                 `protobuf:"bytes,2,opt,name=frame_bytes,json=frameBytes,proto3" json:"frame_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GatewayBroadcastReq) Reset() {
+	*x = GatewayBroadcastReq{}
+	mi := &file_protocol_mim_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatewayBroadcastReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatewayBroadcastReq) ProtoMessage() {}
+
+func (x *GatewayBroadcastReq) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatewayBroadcastReq.ProtoReflect.Descriptor instead.
+func (*GatewayBroadcastReq) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GatewayBroadcastReq) GetUserIds() []uint64 {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
+func (x *GatewayBroadcastReq) GetFrameBytes() []byte {
+	if x != nil {
+		return x.FrameBytes
+	}
+	return nil
+}
+
+type GatewayBroadcastResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SentCount     int32                  `protobuf:"varint,1,opt,name=sent_count,json=sentCount,proto3" json:"sent_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GatewayBroadcastResp) Reset() {
+	*x = GatewayBroadcastResp{}
+	mi := &file_protocol_mim_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatewayBroadcastResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatewayBroadcastResp) ProtoMessage() {}
+
+func (x *GatewayBroadcastResp) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_mim_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatewayBroadcastResp.ProtoReflect.Descriptor instead.
+func (*GatewayBroadcastResp) Descriptor() ([]byte, []int) {
+	return file_protocol_mim_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *GatewayBroadcastResp) GetSentCount() int32 {
+	if x != nil {
+		return x.SentCount
+	}
+	return 0
+}
+
+var File_protocol_mim_proto protoreflect.FileDescriptor
+
+const file_protocol_mim_proto_rawDesc = "" +
 	"\n" +
-	"\tmim.proto\x12\fmim.protocol\"\xcc\x01\n" +
+	"\x12protocol/mim.proto\x12\fmim.protocol\"\xcc\x01\n" +
 	"\tQuoteInfo\x12\"\n" +
 	"\rquoted_msg_id\x18\x01 \x01(\x04R\vquotedMsgId\x12\"\n" +
 	"\rquoted_seq_id\x18\x02 \x01(\x04R\vquotedSeqId\x12$\n" +
 	"\x0equoted_user_id\x18\x03 \x01(\x04R\fquotedUserId\x12(\n" +
 	"\x10quoted_user_name\x18\x04 \x01(\tR\x0equotedUserName\x12'\n" +
-	"\x0fpreview_content\x18\x05 \x01(\tR\x0epreviewContent\"\xc2\x03\n" +
+	"\x0fpreview_content\x18\x05 \x01(\tR\x0epreviewContent\"\xec\x03\n" +
 	"\vChatMessage\x12\x15\n" +
 	"\x06msg_id\x18\x01 \x01(\x04R\x05msgId\x12\"\n" +
 	"\rclient_msg_id\x18\x02 \x01(\tR\vclientMsgId\x12'\n" +
@@ -772,7 +1419,8 @@ const file_mim_proto_rawDesc = "" +
 	"\x06seq_id\x18\n" +
 	" \x01(\x04R\x05seqId\x12\x1b\n" +
 	"\tsend_time\x18\v \x01(\x03R\bsendTime\x12!\n" +
-	"\fis_encrypted\x18\f \x01(\bR\visEncrypted\"\xb0\x01\n" +
+	"\fis_encrypted\x18\f \x01(\bR\visEncrypted\x12(\n" +
+	"\x10sender_device_id\x18\r \x01(\tR\x0esenderDeviceId\"\xb0\x01\n" +
 	"\n" +
 	"MessageAck\x12\"\n" +
 	"\rclient_msg_id\x18\x01 \x01(\tR\vclientMsgId\x12\x15\n" +
@@ -805,7 +1453,51 @@ const file_mim_proto_rawDesc = "" +
 	"\rAuthHandshake\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1b\n" +
-	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId*\x95\x01\n" +
+	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId\"|\n" +
+	"\rKickOutNotify\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\"\n" +
+	"\rnew_device_id\x18\x03 \x01(\tR\vnewDeviceId\x12\x1b\n" +
+	"\tkick_time\x18\x04 \x01(\x03R\bkickTime\"\x8c\x01\n" +
+	"\vReadReceipt\x12'\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\x04R\x06userId\x12\x1e\n" +
+	"\vread_seq_id\x18\x03 \x01(\x04R\treadSeqId\x12\x1b\n" +
+	"\tread_time\x18\x04 \x01(\x03R\breadTime\"\xad\x01\n" +
+	"\vDeliveryAck\x12\"\n" +
+	"\rclient_msg_id\x18\x01 \x01(\tR\vclientMsgId\x12\x15\n" +
+	"\x06msg_id\x18\x02 \x01(\x04R\x05msgId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x15\n" +
+	"\x06seq_id\x18\x04 \x01(\x04R\x05seqId\x12#\n" +
+	"\rdelivery_time\x18\x05 \x01(\x03R\fdeliveryTime\",\n" +
+	"\x10WebRTCSignalResp\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"X\n" +
+	"\x11AuthHandshakeResp\x12\x14\n" +
+	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\x04R\x06userId\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"v\n" +
+	"\x0eGatewayPushReq\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x04R\x06userId\x12\x1f\n" +
+	"\vframe_bytes\x18\x02 \x01(\fR\n" +
+	"frameBytes\x12*\n" +
+	"\x11exclude_device_id\x18\x03 \x01(\tR\x0fexcludeDeviceId\"_\n" +
+	"\x0fGatewayPushResp\x12\x1c\n" +
+	"\tdelivered\x18\x01 \x01(\bR\tdelivered\x12.\n" +
+	"\x13target_device_count\x18\x02 \x01(\x05R\x11targetDeviceCount\"\x81\x01\n" +
+	"\x0eGatewayKickReq\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\"\n" +
+	"\rnew_device_id\x18\x03 \x01(\tR\vnewDeviceId\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\")\n" +
+	"\x0fGatewayKickResp\x12\x16\n" +
+	"\x06kicked\x18\x01 \x01(\bR\x06kicked\"Q\n" +
+	"\x13GatewayBroadcastReq\x12\x19\n" +
+	"\buser_ids\x18\x01 \x03(\x04R\auserIds\x12\x1f\n" +
+	"\vframe_bytes\x18\x02 \x01(\fR\n" +
+	"frameBytes\"5\n" +
+	"\x14GatewayBroadcastResp\x12\x1d\n" +
+	"\n" +
+	"sent_count\x18\x01 \x01(\x05R\tsentCount*\x95\x01\n" +
 	"\vMessageType\x12\b\n" +
 	"\x04TEXT\x10\x00\x12\f\n" +
 	"\bMARKDOWN\x10\x01\x12\t\n" +
@@ -821,67 +1513,108 @@ const file_mim_proto_rawDesc = "" +
 	"\x10ConversationType\x12\n" +
 	"\n" +
 	"\x06SINGLE\x10\x00\x12\t\n" +
-	"\x05GROUP\x10\x01B\x0eZ\fmim/protocolb\x06proto3"
+	"\x05GROUP\x10\x012\xcd\x03\n" +
+	"\fLogicService\x12B\n" +
+	"\vSendMessage\x12\x19.mim.protocol.ChatMessage\x1a\x18.mim.protocol.MessageAck\x12E\n" +
+	"\fSyncMessages\x12\x19.mim.protocol.SyncRequest\x1a\x1a.mim.protocol.SyncResponse\x12I\n" +
+	"\x12ProcessDeliveryAck\x12\x19.mim.protocol.DeliveryAck\x1a\x18.mim.protocol.MessageAck\x12I\n" +
+	"\x12ProcessReadReceipt\x12\x19.mim.protocol.ReadReceipt\x1a\x18.mim.protocol.MessageAck\x12O\n" +
+	"\x11RouteWebRTCSignal\x12\x1a.mim.protocol.WebRTCSignal\x1a\x1e.mim.protocol.WebRTCSignalResp\x12K\n" +
+	"\vVerifyToken\x12\x1b.mim.protocol.AuthHandshake\x1a\x1f.mim.protocol.AuthHandshakeResp2\xfb\x01\n" +
+	"\x0eGatewayService\x12J\n" +
+	"\vPushMessage\x12\x1c.mim.protocol.GatewayPushReq\x1a\x1d.mim.protocol.GatewayPushResp\x12I\n" +
+	"\n" +
+	"KickDevice\x12\x1c.mim.protocol.GatewayKickReq\x1a\x1d.mim.protocol.GatewayKickResp\x12R\n" +
+	"\tBroadcast\x12!.mim.protocol.GatewayBroadcastReq\x1a\".mim.protocol.GatewayBroadcastRespB\x0eZ\fmim/protocolb\x06proto3"
 
 var (
-	file_mim_proto_rawDescOnce sync.Once
-	file_mim_proto_rawDescData []byte
+	file_protocol_mim_proto_rawDescOnce sync.Once
+	file_protocol_mim_proto_rawDescData []byte
 )
 
-func file_mim_proto_rawDescGZIP() []byte {
-	file_mim_proto_rawDescOnce.Do(func() {
-		file_mim_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_mim_proto_rawDesc), len(file_mim_proto_rawDesc)))
+func file_protocol_mim_proto_rawDescGZIP() []byte {
+	file_protocol_mim_proto_rawDescOnce.Do(func() {
+		file_protocol_mim_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_protocol_mim_proto_rawDesc), len(file_protocol_mim_proto_rawDesc)))
 	})
-	return file_mim_proto_rawDescData
+	return file_protocol_mim_proto_rawDescData
 }
 
-var file_mim_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_mim_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
-var file_mim_proto_goTypes = []any{
-	(MessageType)(0),      // 0: mim.protocol.MessageType
-	(ConversationType)(0), // 1: mim.protocol.ConversationType
-	(*QuoteInfo)(nil),     // 2: mim.protocol.QuoteInfo
-	(*ChatMessage)(nil),   // 3: mim.protocol.ChatMessage
-	(*MessageAck)(nil),    // 4: mim.protocol.MessageAck
-	(*SyncRequest)(nil),   // 5: mim.protocol.SyncRequest
-	(*SyncResponse)(nil),  // 6: mim.protocol.SyncResponse
-	(*WebRTCSignal)(nil),  // 7: mim.protocol.WebRTCSignal
-	(*Heartbeat)(nil),     // 8: mim.protocol.Heartbeat
-	(*AuthHandshake)(nil), // 9: mim.protocol.AuthHandshake
+var file_protocol_mim_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_protocol_mim_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_protocol_mim_proto_goTypes = []any{
+	(MessageType)(0),             // 0: mim.protocol.MessageType
+	(ConversationType)(0),        // 1: mim.protocol.ConversationType
+	(*QuoteInfo)(nil),            // 2: mim.protocol.QuoteInfo
+	(*ChatMessage)(nil),          // 3: mim.protocol.ChatMessage
+	(*MessageAck)(nil),           // 4: mim.protocol.MessageAck
+	(*SyncRequest)(nil),          // 5: mim.protocol.SyncRequest
+	(*SyncResponse)(nil),         // 6: mim.protocol.SyncResponse
+	(*WebRTCSignal)(nil),         // 7: mim.protocol.WebRTCSignal
+	(*Heartbeat)(nil),            // 8: mim.protocol.Heartbeat
+	(*AuthHandshake)(nil),        // 9: mim.protocol.AuthHandshake
+	(*KickOutNotify)(nil),        // 10: mim.protocol.KickOutNotify
+	(*ReadReceipt)(nil),          // 11: mim.protocol.ReadReceipt
+	(*DeliveryAck)(nil),          // 12: mim.protocol.DeliveryAck
+	(*WebRTCSignalResp)(nil),     // 13: mim.protocol.WebRTCSignalResp
+	(*AuthHandshakeResp)(nil),    // 14: mim.protocol.AuthHandshakeResp
+	(*GatewayPushReq)(nil),       // 15: mim.protocol.GatewayPushReq
+	(*GatewayPushResp)(nil),      // 16: mim.protocol.GatewayPushResp
+	(*GatewayKickReq)(nil),       // 17: mim.protocol.GatewayKickReq
+	(*GatewayKickResp)(nil),      // 18: mim.protocol.GatewayKickResp
+	(*GatewayBroadcastReq)(nil),  // 19: mim.protocol.GatewayBroadcastReq
+	(*GatewayBroadcastResp)(nil), // 20: mim.protocol.GatewayBroadcastResp
 }
-var file_mim_proto_depIdxs = []int32{
-	1, // 0: mim.protocol.ChatMessage.conv_type:type_name -> mim.protocol.ConversationType
-	0, // 1: mim.protocol.ChatMessage.msg_type:type_name -> mim.protocol.MessageType
-	2, // 2: mim.protocol.ChatMessage.quote:type_name -> mim.protocol.QuoteInfo
-	3, // 3: mim.protocol.SyncResponse.messages:type_name -> mim.protocol.ChatMessage
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+var file_protocol_mim_proto_depIdxs = []int32{
+	1,  // 0: mim.protocol.ChatMessage.conv_type:type_name -> mim.protocol.ConversationType
+	0,  // 1: mim.protocol.ChatMessage.msg_type:type_name -> mim.protocol.MessageType
+	2,  // 2: mim.protocol.ChatMessage.quote:type_name -> mim.protocol.QuoteInfo
+	3,  // 3: mim.protocol.SyncResponse.messages:type_name -> mim.protocol.ChatMessage
+	3,  // 4: mim.protocol.LogicService.SendMessage:input_type -> mim.protocol.ChatMessage
+	5,  // 5: mim.protocol.LogicService.SyncMessages:input_type -> mim.protocol.SyncRequest
+	12, // 6: mim.protocol.LogicService.ProcessDeliveryAck:input_type -> mim.protocol.DeliveryAck
+	11, // 7: mim.protocol.LogicService.ProcessReadReceipt:input_type -> mim.protocol.ReadReceipt
+	7,  // 8: mim.protocol.LogicService.RouteWebRTCSignal:input_type -> mim.protocol.WebRTCSignal
+	9,  // 9: mim.protocol.LogicService.VerifyToken:input_type -> mim.protocol.AuthHandshake
+	15, // 10: mim.protocol.GatewayService.PushMessage:input_type -> mim.protocol.GatewayPushReq
+	17, // 11: mim.protocol.GatewayService.KickDevice:input_type -> mim.protocol.GatewayKickReq
+	19, // 12: mim.protocol.GatewayService.Broadcast:input_type -> mim.protocol.GatewayBroadcastReq
+	4,  // 13: mim.protocol.LogicService.SendMessage:output_type -> mim.protocol.MessageAck
+	6,  // 14: mim.protocol.LogicService.SyncMessages:output_type -> mim.protocol.SyncResponse
+	4,  // 15: mim.protocol.LogicService.ProcessDeliveryAck:output_type -> mim.protocol.MessageAck
+	4,  // 16: mim.protocol.LogicService.ProcessReadReceipt:output_type -> mim.protocol.MessageAck
+	13, // 17: mim.protocol.LogicService.RouteWebRTCSignal:output_type -> mim.protocol.WebRTCSignalResp
+	14, // 18: mim.protocol.LogicService.VerifyToken:output_type -> mim.protocol.AuthHandshakeResp
+	16, // 19: mim.protocol.GatewayService.PushMessage:output_type -> mim.protocol.GatewayPushResp
+	18, // 20: mim.protocol.GatewayService.KickDevice:output_type -> mim.protocol.GatewayKickResp
+	20, // 21: mim.protocol.GatewayService.Broadcast:output_type -> mim.protocol.GatewayBroadcastResp
+	13, // [13:22] is the sub-list for method output_type
+	4,  // [4:13] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_mim_proto_init() }
-func file_mim_proto_init() {
-	if File_mim_proto != nil {
+func init() { file_protocol_mim_proto_init() }
+func file_protocol_mim_proto_init() {
+	if File_protocol_mim_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mim_proto_rawDesc), len(file_mim_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_mim_proto_rawDesc), len(file_protocol_mim_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   8,
+			NumMessages:   19,
 			NumExtensions: 0,
-			NumServices:   0,
+			NumServices:   2,
 		},
-		GoTypes:           file_mim_proto_goTypes,
-		DependencyIndexes: file_mim_proto_depIdxs,
-		EnumInfos:         file_mim_proto_enumTypes,
-		MessageInfos:      file_mim_proto_msgTypes,
+		GoTypes:           file_protocol_mim_proto_goTypes,
+		DependencyIndexes: file_protocol_mim_proto_depIdxs,
+		EnumInfos:         file_protocol_mim_proto_enumTypes,
+		MessageInfos:      file_protocol_mim_proto_msgTypes,
 	}.Build()
-	File_mim_proto = out.File
-	file_mim_proto_goTypes = nil
-	file_mim_proto_depIdxs = nil
+	File_protocol_mim_proto = out.File
+	file_protocol_mim_proto_goTypes = nil
+	file_protocol_mim_proto_depIdxs = nil
 }
