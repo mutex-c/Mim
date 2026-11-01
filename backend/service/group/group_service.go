@@ -2,6 +2,7 @@ package group
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"mim/models"
@@ -80,6 +81,21 @@ func (s *Service) CreateGroup(req *CreateGroupReq) (*models.Group, error) {
 				return err
 			}
 		}
+		// Create conversation records for owner and members
+		convID := fmt.Sprintf("group_%d", grp.ID)
+		allUserIDs := append([]uint64{req.OwnerID}, req.MemberIDs...)
+		for _, uid := range allUserIDs {
+			c := models.Conversation{
+				ConversationID: convID,
+				UserID:         uid,
+				TargetID:       grp.ID,
+				ConvType:       models.ConvTypeGroup,
+				LastMsgPreview: "群聊已创建",
+				LastMsgTime:    time.Now(),
+			}
+			_ = tx.Create(&c).Error
+		}
+
 		return nil
 	})
 
@@ -190,6 +206,197 @@ func (s *Service) KickMember(operatorID, groupID, targetUserID uint64) error {
 		if err := tx.Delete(&targetMember).Error; err != nil {
 			return err
 		}
+		// Also delete conversation for kicked user
+		convID := fmt.Sprintf("group_%d", groupID)
+		_ = tx.Where("user_id = ? AND conversation_id = ?", targetUserID, convID).Delete(&models.Conversation{}).Error
 		return tx.Model(&models.Group{}).Where("id = ?", groupID).Update("member_count", gorm.Expr("member_count - 1")).Error
 	})
 }
+
+// InviteMembers adds new members to the group
+func (s *Service) InviteMembers(operatorID, groupID uint64, memberIDs []uint64) error {
+	var opMember models.GroupMember
+	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, operatorID).First(&opMember).Error; err != nil {
+		return ErrPermissionDenied
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		addedCount := 0
+		for _, uid := range memberIDs {
+			var count int64
+			tx.Model(&models.GroupMember{}).Where("group_id = ? AND user_id = ?", groupID, uid).Count(&count)
+			if count > 0 {
+				continue
+			}
+			newM := models.GroupMember{
+				GroupID: groupID,
+				UserID:  uid,
+				Role:    models.GroupRoleMember,
+			}
+			if err := tx.Create(&newM).Error; err != nil {
+				return err
+			}
+			// Ensure conversation exists for invited user
+			convID := fmt.Sprintf("group_%d", groupID)
+			var userConv models.Conversation
+			tx.Where("user_id = ? AND conversation_id = ?", uid, convID).FirstOrCreate(&userConv, models.Conversation{
+				ConversationID: convID,
+				UserID:         uid,
+				TargetID:       groupID,
+				ConvType:       models.ConvTypeGroup,
+				LastMsgPreview: "欢迎加入群聊",
+				LastMsgTime:    time.Now(),
+			})
+			addedCount++
+		}
+		if addedCount > 0 {
+			return tx.Model(&models.Group{}).Where("id = ?", groupID).Update("member_count", gorm.Expr("member_count + ?", addedCount)).Error
+		}
+		return nil
+	})
+}
+
+// UpdateGroupSettings updates group info and preferences
+func (s *Service) UpdateGroupSettings(operatorID, groupID uint64, title, notice, avatar string, isSearchable, joinMode, isAllMuted int8) error {
+	var opMember models.GroupMember
+	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, operatorID).First(&opMember).Error; err != nil {
+		return ErrPermissionDenied
+	}
+	if opMember.Role != models.GroupRoleOwner && opMember.Role != models.GroupRoleAdmin {
+		return ErrPermissionDenied
+	}
+
+	updates := map[string]interface{}{}
+	if title != "" {
+		updates["title"] = title
+	}
+	if notice != "" {
+		updates["notice"] = notice
+	}
+	if avatar != "" {
+		updates["avatar"] = avatar
+	}
+	if isSearchable >= 0 {
+		updates["is_searchable"] = isSearchable
+	}
+	if joinMode > 0 {
+		updates["join_mode"] = joinMode
+	}
+	if isAllMuted >= 0 {
+		updates["is_all_muted"] = isAllMuted
+	}
+
+	return s.db.Model(&models.Group{}).Where("id = ?", groupID).Updates(updates).Error
+}
+
+// DisbandGroup dissolves a group
+func (s *Service) DisbandGroup(operatorID, groupID uint64) error {
+	var grp models.Group
+	if err := s.db.First(&grp, groupID).Error; err != nil {
+		return ErrGroupNotFound
+	}
+	if grp.OwnerID != operatorID {
+		return ErrPermissionDenied
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		convID := fmt.Sprintf("group_%d", groupID)
+		if err := tx.Where("group_id = ?", groupID).Delete(&models.GroupMember{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("conversation_id = ?", convID).Delete(&models.Conversation{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&grp).Error
+	})
+}
+
+// SetMemberRole sets or revokes admin role for a member (only Owner can perform)
+func (s *Service) SetMemberRole(operatorID, groupID, targetUserID uint64, newRole int8) error {
+	var opMember models.GroupMember
+	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, operatorID).First(&opMember).Error; err != nil {
+		return ErrPermissionDenied
+	}
+	if opMember.Role != models.GroupRoleOwner {
+		return ErrPermissionDenied
+	}
+
+	if targetUserID == operatorID {
+		return errors.New("cannot change owner's role directly, please transfer ownership instead")
+	}
+
+	if newRole != models.GroupRoleAdmin && newRole != models.GroupRoleMember {
+		return errors.New("invalid role")
+	}
+
+	var targetMember models.GroupMember
+	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, targetUserID).First(&targetMember).Error; err != nil {
+		return errors.New("target member not found")
+	}
+
+	return s.db.Model(&targetMember).Update("role", newRole).Error
+}
+
+// TransferOwner transfers group ownership to another member
+func (s *Service) TransferOwner(operatorID, groupID, newOwnerID uint64) error {
+	var grp models.Group
+	if err := s.db.First(&grp, groupID).Error; err != nil {
+		return ErrGroupNotFound
+	}
+	if grp.OwnerID != operatorID {
+		return ErrPermissionDenied
+	}
+
+	if newOwnerID == operatorID {
+		return errors.New("already the owner")
+	}
+
+	var newOwnerMember models.GroupMember
+	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, newOwnerID).First(&newOwnerMember).Error; err != nil {
+		return errors.New("target member is not in this group")
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&grp).Update("owner_id", newOwnerID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&newOwnerMember).Update("role", models.GroupRoleOwner).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.GroupMember{}).Where("group_id = ? AND user_id = ?", groupID, operatorID).Update("role", models.GroupRoleAdmin).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// QuitGroup removes user from the group (Owner cannot quit directly)
+func (s *Service) QuitGroup(userID, groupID uint64) error {
+	var member models.GroupMember
+	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, userID).First(&member).Error; err != nil {
+		return errors.New("user is not in this group")
+	}
+
+	if member.Role == models.GroupRoleOwner {
+		return ErrOwnerCannotLeave
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&member).Error; err != nil {
+			return err
+		}
+		convID := fmt.Sprintf("group_%d", groupID)
+		_ = tx.Where("user_id = ? AND conversation_id = ?", userID, convID).Delete(&models.Conversation{}).Error
+		return tx.Model(&models.Group{}).Where("id = ?", groupID).Update("member_count", gorm.Expr("member_count - 1")).Error
+	})
+}
+
+// GetGroupDetails returns full group model
+func (s *Service) GetGroupDetails(groupID uint64) (*models.Group, error) {
+	var grp models.Group
+	if err := s.db.First(&grp, groupID).Error; err != nil {
+		return nil, ErrGroupNotFound
+	}
+	return &grp, nil
+}
+

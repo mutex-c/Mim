@@ -2,6 +2,8 @@ package user
 
 import (
 	"errors"
+	"fmt"
+	"time"
 
 	"mim/models"
 
@@ -123,26 +125,126 @@ func (s *Service) SearchUser(keyword string, currentUserID uint64) ([]*UserSearc
 	return results, nil
 }
 
-// SendFriendRequest creates a friend verification record
-func (s *Service) SendFriendRequest(senderID, receiverID uint64, verifyMsg string) error {
+// establishFriendship binds two users as mutual friends, creates conversation entries, and posts a welcome message
+func (s *Service) establishFriendship(tx *gorm.DB, u1, u2 uint64) error {
+	// Clean up any existing friendship records (including soft-deleted) to avoid unique constraint violations
+	if err := tx.Unscoped().Where("(user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)", u1, u2, u2, u1).Delete(&models.Friend{}).Error; err != nil {
+		return err
+	}
+
+	now := time.Now()
+	f1 := models.Friend{UserID: u1, FriendID: u2, CreatedAt: now, UpdatedAt: now}
+	f2 := models.Friend{UserID: u2, FriendID: u1, CreatedAt: now, UpdatedAt: now}
+	if err := tx.Create(&f1).Error; err != nil {
+		return err
+	}
+	if err := tx.Create(&f2).Error; err != nil {
+		return err
+	}
+
+	// Update any pending friend verifications between u1 and u2 to agreed
+	_ = tx.Model(&models.FriendVerification{}).
+		Where("((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)) AND status = ?", u1, u2, u2, u1, models.FriendVerificationPending).
+		Update("status", models.FriendVerificationAgreed).Error
+
+	minID := u1
+	maxID := u2
+	if minID > maxID {
+		minID, maxID = maxID, minID
+	}
+	convID := fmt.Sprintf("%d_%d", minID, maxID)
+
+	var maxSeq uint64
+	row := tx.Model(&models.Message{}).Where("conversation_id = ?", convID).Select("COALESCE(MAX(seq_id), 0)").Row()
+	_ = row.Scan(&maxSeq)
+	nextSeq := maxSeq + 1
+
+	c1 := models.Conversation{
+		ConversationID: convID,
+		UserID:         u1,
+		TargetID:       u2,
+		ConvType:       models.ConvTypeSingle,
+		LastMsgPreview: "你们已成为好友，现在可以开始聊天了",
+		LastMsgTime:    now,
+		LastMsgSeq:     nextSeq,
+	}
+	_ = tx.Where("conversation_id = ? AND user_id = ?", convID, u1).FirstOrCreate(&c1).Error
+	_ = tx.Model(&models.Conversation{}).Where("conversation_id = ? AND user_id = ?", convID, u1).Updates(map[string]interface{}{
+		"last_msg_preview": "你们已成为好友，现在可以开始聊天了",
+		"last_msg_time":    now,
+		"last_msg_seq":     nextSeq,
+	}).Error
+
+	c2 := models.Conversation{
+		ConversationID: convID,
+		UserID:         u2,
+		TargetID:       u1,
+		ConvType:       models.ConvTypeSingle,
+		LastMsgPreview: "你们已成为好友，现在可以开始聊天了",
+		LastMsgTime:    now,
+		LastMsgSeq:     nextSeq,
+	}
+	_ = tx.Where("conversation_id = ? AND user_id = ?", convID, u2).FirstOrCreate(&c2).Error
+	_ = tx.Model(&models.Conversation{}).Where("conversation_id = ? AND user_id = ?", convID, u2).Updates(map[string]interface{}{
+		"last_msg_preview": "你们已成为好友，现在可以开始聊天了",
+		"last_msg_time":    now,
+		"last_msg_seq":     nextSeq,
+	}).Error
+
+	welcomeMsg := models.Message{
+		ClientMsgID:    fmt.Sprintf("sys_friend_%d_%d_%d", minID, maxID, now.UnixNano()),
+		ConversationID: convID,
+		ConvType:       models.ConvTypeSingle,
+		SenderID:       0,
+		ReceiverID:     0,
+		SeqID:          nextSeq,
+		MsgType:        models.MsgTypeText,
+		Content:        "你们已成为好友，现在可以开始聊天了。",
+		CreatedAt:      now,
+	}
+	return tx.Create(&welcomeMsg).Error
+}
+
+// SendFriendRequest creates a friend verification record or directly establishes friendship
+func (s *Service) SendFriendRequest(senderID, receiverID uint64, verifyMsg string) (bool, error) {
 	if senderID == receiverID {
-		return ErrCannotAddSelf
+		return false, ErrCannotAddSelf
 	}
 
 	// Check if already friends
 	var count int64
 	s.db.Model(&models.Friend{}).Where("user_id = ? AND friend_id = ?", senderID, receiverID).Count(&count)
 	if count > 0 {
-		return ErrAlreadyFriends
+		return false, ErrAlreadyFriends
 	}
 
-	// Check existing pending request
-	var pendingCount int64
-	s.db.Model(&models.FriendVerification{}).
-		Where("sender_id = ? AND receiver_id = ? AND status = ?", senderID, receiverID, models.FriendVerificationPending).
-		Count(&pendingCount)
-	if pendingCount > 0 {
-		return ErrVerificationExists
+	// Check if receiver already sent a pending request to sender (cross-request -> instant mutual friendship)
+	var reverseVerify models.FriendVerification
+	if err := s.db.Where("sender_id = ? AND receiver_id = ? AND status = ?", receiverID, senderID, models.FriendVerificationPending).First(&reverseVerify).Error; err == nil {
+		err = s.HandleFriendRequest(reverseVerify.ID, senderID, models.FriendVerificationAgreed)
+		return true, err
+	}
+
+	// Check receiver's FriendVerifyMode
+	var receiverConfig models.UserConfig
+	if err := s.db.Where("user_id = ?", receiverID).First(&receiverConfig).Error; err == nil {
+		if receiverConfig.FriendVerifyMode == models.VerifyModeRejectAll {
+			return false, errors.New("对方已开启拒绝添加好友")
+		}
+		if receiverConfig.FriendVerifyMode == models.VerifyModeDirect { // 1 = Direct Add (No verification required)
+			err := s.db.Transaction(func(tx *gorm.DB) error {
+				return s.establishFriendship(tx, senderID, receiverID)
+			})
+			return true, err
+		}
+	}
+
+	// Check existing pending request from sender to receiver
+	var existing models.FriendVerification
+	if err := s.db.Where("sender_id = ? AND receiver_id = ? AND status = ?", senderID, receiverID, models.FriendVerificationPending).First(&existing).Error; err == nil {
+		existing.VerifyMsg = verifyMsg
+		existing.UpdatedAt = time.Now()
+		return false, s.db.Save(&existing).Error
 	}
 
 	req := models.FriendVerification{
@@ -151,7 +253,45 @@ func (s *Service) SendFriendRequest(senderID, receiverID uint64, verifyMsg strin
 		VerifyMsg:  verifyMsg,
 		Status:     models.FriendVerificationPending,
 	}
-	return s.db.Create(&req).Error
+	return false, s.db.Create(&req).Error
+}
+
+// FriendRequestItem represents a pending or handled friend request item
+type FriendRequestItem struct {
+	ID        uint64 `json:"id"`
+	SenderID  uint64 `json:"sender_id"`
+	Account   string `json:"account"`
+	Nickname  string `json:"nickname"`
+	Avatar    string `json:"avatar"`
+	VerifyMsg string `json:"verify_msg"`
+	Status    int8   `json:"status"` // 1: Pending, 2: Agreed, 3: Rejected
+	CreatedAt string `json:"created_at"`
+}
+
+// GetFriendRequests returns all incoming verification requests for a user
+func (s *Service) GetFriendRequests(userID uint64) ([]FriendRequestItem, error) {
+	var records []models.FriendVerification
+	err := s.db.Where("receiver_id = ?", userID).Order("status ASC, created_at DESC").Limit(50).Find(&records).Error
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]FriendRequestItem, 0, len(records))
+	for _, r := range records {
+		var u models.User
+		s.db.Select("id, account, nickname, avatar").First(&u, r.SenderID)
+		items = append(items, FriendRequestItem{
+			ID:        r.ID,
+			SenderID:  r.SenderID,
+			Account:   u.Account,
+			Nickname:  u.Nickname,
+			Avatar:    u.Avatar,
+			VerifyMsg: r.VerifyMsg,
+			Status:    r.Status,
+			CreatedAt: r.CreatedAt.Format("2006-01-02 15:04"),
+		})
+	}
+	return items, nil
 }
 
 // HandleFriendRequest processes a verification (agreed, rejected, ignored)
@@ -175,14 +315,9 @@ func (s *Service) HandleFriendRequest(verificationID, currentUserID uint64, acti
 			return err
 		}
 
-		// If agreed, establish mutual friendship
+		// If agreed, establish mutual friendship and create conversations
 		if action == models.FriendVerificationAgreed {
-			f1 := models.Friend{UserID: verify.SenderID, FriendID: verify.ReceiverID}
-			f2 := models.Friend{UserID: verify.ReceiverID, FriendID: verify.SenderID}
-			if err := tx.FirstOrCreate(&f1, f1).Error; err != nil {
-				return err
-			}
-			if err := tx.FirstOrCreate(&f2, f2).Error; err != nil {
+			if err := s.establishFriendship(tx, verify.SenderID, verify.ReceiverID); err != nil {
 				return err
 			}
 		}
@@ -232,5 +367,5 @@ func (s *Service) GetFriendList(userID uint64) ([]*FriendItem, error) {
 
 // DeleteFriend removes friendship
 func (s *Service) DeleteFriend(userID, friendID uint64) error {
-	return s.db.Where("user_id = ? AND friend_id = ?", userID, friendID).Delete(&models.Friend{}).Error
+	return s.db.Unscoped().Where("user_id = ? AND friend_id = ?", userID, friendID).Delete(&models.Friend{}).Error
 }

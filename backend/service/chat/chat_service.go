@@ -1,13 +1,16 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"mim/models"
+	"mim/pkg/redisx"
 	"mim/protocol"
 
 	"google.golang.org/protobuf/proto"
@@ -22,16 +25,31 @@ var (
 
 type Service struct {
 	db     *gorm.DB
-	hub    *Hub
+	pusher MessagePusher
+	rdb    *redisx.Client
 	seqMap map[string]uint64
 	seqMu  sync.Mutex
 }
 
-func NewService(db *gorm.DB, hub *Hub) *Service {
+func NewService(db *gorm.DB, pusher MessagePusher, rdb *redisx.Client) *Service {
 	return &Service{
 		db:     db,
-		hub:    hub,
+		pusher: pusher,
+		rdb:    rdb,
 		seqMap: make(map[string]uint64),
+	}
+}
+
+func (s *Service) sendToUser(userID uint64, data []byte) bool {
+	if s.pusher != nil {
+		return s.pusher.SendToUser(userID, data)
+	}
+	return false
+}
+
+func (s *Service) sendToUserExclude(userID uint64, excludeDeviceID string, data []byte) {
+	if s.pusher != nil {
+		s.pusher.SendToUserExclude(userID, excludeDeviceID, data)
 	}
 }
 
@@ -44,8 +62,20 @@ func FormatSingleConvID(u1, u2 uint64) string {
 }
 
 // NextSeqID allocates a strictly monotonically increasing sequence number for a conversation
-// Monotonically increasing, gap-tolerant: Redis INCR / DB transaction failure creates gaps but preserves monotonic order
+// Monotonically increasing, gap-tolerant: Redis INCR with DB fallback preserves monotonic order
 func (s *Service) NextSeqID(convID string) uint64 {
+	if s.rdb != nil {
+		seq, err := s.rdb.NextSeqID(context.Background(), convID, func() uint64 {
+			var maxSeq uint64
+			row := s.db.Model(&models.Message{}).Where("conversation_id = ?", convID).Select("COALESCE(MAX(seq_id), 0)").Row()
+			_ = row.Scan(&maxSeq)
+			return maxSeq
+		})
+		if err == nil {
+			return seq
+		}
+	}
+
 	s.seqMu.Lock()
 	defer s.seqMu.Unlock()
 
@@ -57,7 +87,6 @@ func (s *Service) NextSeqID(convID string) uint64 {
 		_ = row.Scan(&maxSeq)
 		curr = maxSeq
 	}
-
 	curr++
 	s.seqMap[convID] = curr
 	return curr
@@ -121,6 +150,13 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&msg).Error; err != nil {
+			// Idempotency: handle concurrent insert race condition (TOCTOU) gracefully
+			var dup models.Message
+			if s.db.Where("client_msg_id = ?", req.ClientMsgID).First(&dup).Error == nil {
+				msg = dup
+				seqID = dup.SeqID
+				return nil
+			}
 			return err
 		}
 
@@ -132,12 +168,24 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 			TargetID:       req.ReceiverID,
 			ConvType:       req.ConvType,
 		})
+		now := time.Now()
+		msgPreview := req.Content
+		if req.MsgType == models.MsgTypeImage {
+			msgPreview = "[图片]"
+		} else if req.MsgType == models.MsgTypeVoice {
+			msgPreview = "[语音]"
+		} else if req.MsgType == models.MsgTypeFile || strings.HasPrefix(req.Content, "/api/file/download") {
+			msgPreview = "[文件]"
+		} else if req.MsgType == models.MsgTypeRevoke {
+			msgPreview = "一条消息已被撤回"
+		}
+
 		tx.Model(&models.Conversation{}).
 			Where("id = ? AND last_msg_seq < ?", senderConv.ID, seqID).
 			Updates(map[string]interface{}{
 				"last_msg_id":      msg.ID,
 				"last_msg_seq":     seqID,
-				"last_msg_preview": req.Content,
+				"last_msg_preview": msgPreview,
 				"last_msg_time":    now,
 				"last_read_seq":    seqID, // sender has read their own message
 			})
@@ -156,10 +204,39 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 				Updates(map[string]interface{}{
 					"last_msg_id":      msg.ID,
 					"last_msg_seq":     seqID,
-					"last_msg_preview": req.Content,
+					"last_msg_preview": msgPreview,
 					"last_msg_time":    now,
 					"unread_count":     gorm.Expr("unread_count + 1"),
 				})
+		} else {
+			// Group Chat: Update or Create Conversation for ALL group members
+			var groupMembers []models.GroupMember
+			tx.Where("group_id = ?", req.GroupID).Find(&groupMembers)
+			for _, m := range groupMembers {
+				var memberConv models.Conversation
+				tx.Where("user_id = ? AND conversation_id = ?", m.UserID, convID).FirstOrCreate(&memberConv, models.Conversation{
+					ConversationID: convID,
+					UserID:         m.UserID,
+					TargetID:       req.GroupID,
+					ConvType:       req.ConvType,
+				})
+
+				updates := map[string]interface{}{
+					"last_msg_id":      msg.ID,
+					"last_msg_seq":     seqID,
+					"last_msg_preview": msgPreview,
+					"last_msg_time":    now,
+				}
+				if m.UserID == req.SenderID {
+					updates["last_read_seq"] = seqID
+				} else {
+					updates["unread_count"] = gorm.Expr("unread_count + 1")
+				}
+
+				tx.Model(&models.Conversation{}).
+					Where("id = ? AND last_msg_seq < ?", memberConv.ID, seqID).
+					Updates(updates)
+			}
 		}
 		return nil
 	})
@@ -167,6 +244,10 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 	if err != nil {
 		return nil, err
 	}
+
+	// 5. Look up sender info for push metadata
+	var sender models.User
+	s.db.Select("id, nickname, avatar").First(&sender, req.SenderID)
 
 	// 5. Construct Protobuf ChatMessage & Wrap in Aligned Binary Frame
 	protoMsg := &protocol.ChatMessage{
@@ -188,15 +269,42 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 		}
 	}
 
-	payloadBytes, _ := json.Marshal(protoMsg)
+	type ChatPushPayload struct {
+		*protocol.ChatMessage
+		SenderName   string `json:"sender_name"`
+		SenderAvatar string `json:"sender_avatar"`
+	}
+
+	pushObj := ChatPushPayload{
+		ChatMessage:  protoMsg,
+		SenderName:   sender.Nickname,
+		SenderAvatar: sender.Avatar,
+	}
+
+	payloadBytes, _ := json.Marshal(pushObj)
 	pushFrame := protocol.NewFrame(protocol.CmdChatMessagePush, seqID, protocol.FlagJSON, payloadBytes)
 	encodedFrame, _ := pushFrame.Encode()
 
-	// 6. Push to Receiver (if online)
+	// 6. Push to Receiver (if single) or All Group Members (if group)
+	// Note on group fan-out: Currently fans out 1 push task per member with partition key = userID,
+	// which guarantees per-user chronological ordering across Kafka partitions and Transfer consumers.
+	// For super-groups (10,000+ members), this can be further optimized by gateway-level aggregation
+	// (dispatching 1 frame with a target user ID list per active gateway).
 	if req.ConvType == models.ConvTypeSingle {
-		s.hub.SendToUser(req.ReceiverID, encodedFrame)
+		s.sendToUser(req.ReceiverID, encodedFrame)
 		// Multi-device sync for Sender (exclude current sending device)
-		s.hub.SendToUserExclude(req.SenderID, req.SenderDeviceID, encodedFrame)
+		s.sendToUserExclude(req.SenderID, req.SenderDeviceID, encodedFrame)
+	} else {
+		// Group push to all members
+		var members []models.GroupMember
+		s.db.Where("group_id = ?", req.GroupID).Find(&members)
+		for _, m := range members {
+			if m.UserID == req.SenderID {
+				s.sendToUserExclude(req.SenderID, req.SenderDeviceID, encodedFrame)
+			} else {
+				s.sendToUser(m.UserID, encodedFrame)
+			}
+		}
 	}
 
 	// 7. Return ACK
@@ -223,7 +331,7 @@ func (s *Service) RouteWebRTCSignal(signal *protocol.WebRTCSignal) error {
 		return err
 	}
 
-	s.hub.SendToUser(signal.ToUserId, encoded)
+	s.sendToUser(signal.ToUserId, encoded)
 	return nil
 }
 
@@ -234,10 +342,26 @@ func (s *Service) SyncMessages(convID string, lastSeqID uint64, limit int) (*pro
 	}
 
 	var msgs []models.Message
-	err := s.db.Where("conversation_id = ? AND seq_id > ?", convID, lastSeqID).
-		Order("seq_id ASC").
-		Limit(limit).
-		Find(&msgs).Error
+	var err error
+	if lastSeqID > 0 {
+		err = s.db.Where("conversation_id = ? AND seq_id > ?", convID, lastSeqID).
+			Order("seq_id ASC").
+			Limit(limit).
+			Find(&msgs).Error
+	} else {
+		// When lastSeqID is 0, fetch the latest messages in chronological order
+		var revMsgs []models.Message
+		err = s.db.Where("conversation_id = ?", convID).
+			Order("seq_id DESC").
+			Limit(limit).
+			Find(&revMsgs).Error
+		if err == nil {
+			msgs = make([]models.Message, len(revMsgs))
+			for i, m := range revMsgs {
+				msgs[len(revMsgs)-1-i] = m
+			}
+		}
+	}
 
 	if err != nil {
 		return nil, err
@@ -289,9 +413,18 @@ func (s *Service) BatchSyncMessages(cursors []ConvSyncCursor, perConvLimit int) 
 }
 
 // RevokeMessage handles 2-minute time window message revocation
-func (s *Service) RevokeMessage(userID, msgID uint64) error {
+func (s *Service) RevokeMessage(userID, msgID uint64, clientMsgID string) error {
 	var msg models.Message
-	if err := s.db.First(&msg, msgID).Error; err != nil {
+	var err error
+	if msgID > 0 {
+		err = s.db.First(&msg, msgID).Error
+	} else if clientMsgID != "" {
+		err = s.db.Where("client_msg_id = ? AND sender_id = ?", clientMsgID, userID).First(&msg).Error
+	} else {
+		return ErrMessageNotFound
+	}
+
+	if err != nil {
 		return ErrMessageNotFound
 	}
 
@@ -299,8 +432,15 @@ func (s *Service) RevokeMessage(userID, msgID uint64) error {
 		return ErrRevokeForbidden
 	}
 
-	// Check 2 minute limit
-	if time.Since(msg.CreatedAt) > 2*time.Minute {
+	// Check recall time limit (strictly 2 minutes by default per spec, or custom user config)
+	maxRecallWindow := 2 * time.Minute
+	var userCfg models.UserConfig
+	if err := s.db.Where("user_id = ?", userID).First(&userCfg).Error; err == nil && userCfg.RecallTimeLimit > 0 {
+		configuredLimit := time.Duration(userCfg.RecallTimeLimit) * time.Second
+		maxRecallWindow = configuredLimit
+	}
+
+	if time.Since(msg.CreatedAt) > maxRecallWindow {
 		return ErrRevokeTimeExceeded
 	}
 
@@ -314,11 +454,12 @@ func (s *Service) RevokeMessage(userID, msgID uint64) error {
 		// Update conversation preview with Seq Guard
 		tx.Model(&models.Conversation{}).
 			Where("conversation_id = ? AND last_msg_seq <= ?", msg.ConversationID, msg.SeqID).
-			Update("last_msg_preview", "你撤回了一条消息")
+			Update("last_msg_preview", "一条消息已被撤回")
 
 		// Push revoke notify via hub
 		protoRevoke := &protocol.ChatMessage{
 			MsgId:          msg.ID,
+			ClientMsgId:    msg.ClientMsgID,
 			ConversationId: msg.ConversationID,
 			SenderId:       userID,
 			MsgType:        protocol.MessageType_REVOKE,
@@ -331,8 +472,21 @@ func (s *Service) RevokeMessage(userID, msgID uint64) error {
 		encoded, _ := frame.Encode()
 
 		if msg.ConvType == models.ConvTypeSingle {
-			s.hub.SendToUser(msg.ReceiverID, encoded)
-			s.hub.SendToUser(msg.SenderID, encoded)
+			s.sendToUser(msg.ReceiverID, encoded)
+			s.sendToUser(msg.SenderID, encoded)
+		} else {
+			// Group push to all members
+			var groupID uint64
+			if msg.ReceiverID > 0 {
+				groupID = msg.ReceiverID
+			} else {
+				fmt.Sscanf(msg.ConversationID, "group_%d", &groupID)
+			}
+			var members []models.GroupMember
+			s.db.Where("group_id = ?", groupID).Find(&members)
+			for _, m := range members {
+				s.sendToUser(m.UserID, encoded)
+			}
 		}
 		return nil
 	})
@@ -347,3 +501,77 @@ func (s *Service) MarkRead(userID uint64, convID string, lastReadSeq uint64) err
 			"last_read_seq": lastReadSeq,
 		}).Error
 }
+
+// ProcessDeliveryAck consumes client delivery confirmation (CmdDeliveryAck / 0x0103)
+// Transitions message status: SENT -> DELIVERED, and notifies sender
+func (s *Service) ProcessDeliveryAck(ack *protocol.DeliveryAck, receiverID uint64) error {
+	if ack == nil || ack.ConversationId == "" || ack.SeqId == 0 {
+		return errors.New("invalid delivery ack")
+	}
+
+	var msg models.Message
+	if err := s.db.Where("conversation_id = ? AND seq_id = ?", ack.ConversationId, ack.SeqId).First(&msg).Error; err != nil {
+		return err
+	}
+
+	// Update message status to Delivered
+	if msg.Status < models.MsgStatusDelivered {
+		s.db.Model(&models.Message{}).Where("id = ?", msg.ID).Update("status", models.MsgStatusDelivered)
+	}
+
+	// Notify sender that message has arrived at receiver's device
+	ackPayload, _ := json.Marshal(ack)
+	ackFrame := protocol.NewFrame(protocol.CmdDeliveryAck, ack.SeqId, protocol.FlagJSON, ackPayload)
+	if bytes, err := ackFrame.Encode(); err == nil {
+		s.sendToUser(msg.SenderID, bytes)
+	}
+	return nil
+}
+
+// ProcessReadReceipt consumes client read receipt (CmdReadReceipt / 0x0401)
+// Transitions message status: DELIVERED -> READ, updates unread counter, and notifies sender
+func (s *Service) ProcessReadReceipt(receipt *protocol.ReadReceipt) error {
+	if receipt == nil || receipt.ConversationId == "" {
+		return errors.New("invalid read receipt")
+	}
+
+	// 1. Update reader's conversation record (reset unread count)
+	if err := s.MarkRead(receipt.UserId, receipt.ConversationId, receipt.ReadSeqId); err != nil {
+		return err
+	}
+
+	// 2. Mark messages up to read_seq_id as Read
+	s.db.Model(&models.Message{}).
+		Where("conversation_id = ? AND seq_id <= ? AND sender_id != ? AND status < ?",
+			receipt.ConversationId, receipt.ReadSeqId, receipt.UserId, models.MsgStatusRead).
+		Update("status", models.MsgStatusRead)
+
+	// 3. Notify other conversation participant(s) with CmdReadReceipt frame
+	receiptPayload, _ := json.Marshal(receipt)
+	receiptFrame := protocol.NewFrame(protocol.CmdReadReceipt, receipt.ReadSeqId, protocol.FlagJSON, receiptPayload)
+	if bytes, err := receiptFrame.Encode(); err == nil {
+		if strings.HasPrefix(receipt.ConversationId, "group_") {
+			var groupID uint64
+			fmt.Sscanf(receipt.ConversationId, "group_%d", &groupID)
+			var members []models.GroupMember
+			s.db.Where("group_id = ?", groupID).Find(&members)
+			for _, m := range members {
+				if m.UserID != receipt.UserId {
+					s.sendToUser(m.UserID, bytes)
+				}
+			}
+		} else {
+			// Single chat: parse min_max
+			var u1, u2 uint64
+			if _, err := fmt.Sscanf(receipt.ConversationId, "%d_%d", &u1, &u2); err == nil {
+				targetID := u1
+				if targetID == receipt.UserId {
+					targetID = u2
+				}
+				s.sendToUser(targetID, bytes)
+			}
+		}
+	}
+	return nil
+}
+

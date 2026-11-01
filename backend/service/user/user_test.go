@@ -48,7 +48,7 @@ func TestUserService(t *testing.T) {
 	}
 
 	// 2. Test Friend Request Flow
-	err = svc.SendFriendRequest(u1.ID, u2.ID, "Hi, I am Alice")
+	_, err = svc.SendFriendRequest(u1.ID, u2.ID, "Hi, I am Alice")
 	if err != nil {
 		t.Fatalf("send friend request failed: %v", err)
 	}

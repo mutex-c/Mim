@@ -49,8 +49,17 @@ func TestGroupLifecycleAndPermissions(t *testing.T) {
 		t.Errorf("expected 3 members, got: %d", grp.MemberCount)
 	}
 
-	// Promote u2 to Admin
-	db.Model(&models.GroupMember{}).Where("group_id = ? AND user_id = ?", grp.ID, u2.ID).Update("role", models.GroupRoleAdmin)
+	// Promote u2 to Admin using SetMemberRole
+	err = svc.SetMemberRole(u1.ID, grp.ID, u2.ID, models.GroupRoleAdmin)
+	if err != nil {
+		t.Fatalf("promote admin failed: %v", err)
+	}
+
+	// Non-owner trying to set role should fail
+	err = svc.SetMemberRole(u3.ID, grp.ID, u2.ID, models.GroupRoleMember)
+	if err != group.ErrPermissionDenied {
+		t.Errorf("expected ErrPermissionDenied, got: %v", err)
+	}
 
 	// 2. Test Dynamic Mute
 	// Admin mutes Member for 10 minutes
@@ -93,5 +102,31 @@ func TestGroupLifecycleAndPermissions(t *testing.T) {
 	db.First(&updatedGrp, grp.ID)
 	if updatedGrp.MemberCount != 2 {
 		t.Errorf("expected 2 members after kick, got: %d", updatedGrp.MemberCount)
+	}
+
+	// 4. Test QuitGroup: Owner cannot quit directly
+	err = svc.QuitGroup(u1.ID, grp.ID)
+	if err != group.ErrOwnerCannotLeave {
+		t.Errorf("expected ErrOwnerCannotLeave, got: %v", err)
+	}
+
+	// 5. Test TransferOwner
+	err = svc.TransferOwner(u1.ID, grp.ID, u2.ID)
+	if err != nil {
+		t.Fatalf("transfer owner failed: %v", err)
+	}
+	db.First(&updatedGrp, grp.ID)
+	if updatedGrp.OwnerID != u2.ID {
+		t.Errorf("expected owner to be u2 (%d), got: %d", u2.ID, updatedGrp.OwnerID)
+	}
+
+	// Now u1 (demoted to admin) can quit group
+	err = svc.QuitGroup(u1.ID, grp.ID)
+	if err != nil {
+		t.Fatalf("former owner quit failed: %v", err)
+	}
+	db.First(&updatedGrp, grp.ID)
+	if updatedGrp.MemberCount != 1 {
+		t.Errorf("expected 1 member after u1 quit, got: %d", updatedGrp.MemberCount)
 	}
 }
