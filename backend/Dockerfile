@@ -33,8 +33,12 @@ COPY --from=builder /build/bin/mim-gateway ./mim-gateway
 COPY --from=builder /build/bin/mim-logic ./mim-logic
 COPY --from=builder /build/bin/mim-transfer ./mim-transfer
 
+# 前端静态资源：mim-server 以 ./dist 为根目录托管 Web 客户端
+# (缺少这一步时 /app/dist 是空目录，首页直接 404)
+COPY dist ./dist
+
 # 目录与权限初始化
-RUN mkdir -p uploads logs dist && \
+RUN mkdir -p uploads logs && \
     chmod +x ./mim-server ./mim-gateway ./mim-logic ./mim-transfer
 
 EXPOSE 8080 8081 9091 9092
