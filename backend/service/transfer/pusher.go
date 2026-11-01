@@ -66,8 +66,10 @@ func (p *ClusterPusher) dispatch(userID uint64, excludeDeviceID string, data []b
 		}
 	}
 
-	// 2. If Kafka producer is available and not WebRTC, publish to Kafka pipeline
-	if p.producer != nil && !isWebRTC {
+	// 2. Persistent chat traffic goes through Kafka for peak-clipping, but ONLY when a real
+	// Kafka cluster is configured. A memory-mode producer is process-local, so publishing to
+	// it from the logic service would silently swallow the frame (no consumer in this process).
+	if p.producer.IsClusterMode() && !isWebRTC {
 		task := PushTask{
 			TargetUserID:    userID,
 			FrameBytes:      data,
@@ -81,10 +83,11 @@ func (p *ClusterPusher) dispatch(userID uint64, excludeDeviceID string, data []b
 			if err == nil {
 				return true
 			}
+			log.Printf("[ClusterPusher Warning] Kafka publish failed for user %d, falling back to direct gRPC: %v", userID, err)
 		}
 	}
 
-	// 3. Direct gRPC push to gateway (fallback or for WebRTC or when Kafka is not configured)
+	// 3. Direct gRPC push to gateway (WebRTC, no Kafka cluster, or Kafka publish failure)
 	return p.directGRPCPush(userID, excludeDeviceID, data)
 }
 

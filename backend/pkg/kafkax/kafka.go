@@ -3,7 +3,11 @@ package kafkax
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -89,6 +93,84 @@ func (p *Producer) Publish(ctx context.Context, topic string, key, value []byte)
 	return nil
 }
 
+// EnsureTopic creates the topic if it does not exist yet and waits until the broker
+// reports the expected partition count.
+//
+// This is mandatory before starting a consumer-group reader: a consumer that joins a
+// group while the topic does not exist is assigned ZERO partitions and then stays
+// silent forever (no error, no retry) until the process is restarted. On a fresh
+// deployment the push topic only appears when the first message is produced, which
+// happens after mim-transfer has already subscribed — so we must pre-create it.
+func EnsureTopic(ctx context.Context, brokers []string, topic string, partitions int32) error {
+	if len(brokers) == 0 || topic == "" {
+		return nil
+	}
+	if partitions <= 0 {
+		partitions = 1
+	}
+
+	conn, err := kafka.DialContext(ctx, "tcp", brokers[0])
+	if err != nil {
+		return fmt.Errorf("kafka dial for topic %s: %w", topic, err)
+	}
+	defer conn.Close()
+
+	controller, err := conn.Controller()
+	if err != nil {
+		return fmt.Errorf("kafka controller lookup for topic %s: %w", topic, err)
+	}
+
+	ctrlConn, err := kafka.DialContext(ctx, "tcp",
+		net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))
+	if err != nil {
+		return fmt.Errorf("kafka controller dial for topic %s: %w", topic, err)
+	}
+	defer ctrlConn.Close()
+
+	// CreateTopics is idempotent in practice: an existing topic returns TOPIC_ALREADY_EXISTS
+	// (error code 36), which is exactly the success case we want here.
+	if err := ctrlConn.CreateTopics(kafka.TopicConfig{
+		Topic:             topic,
+		NumPartitions:     int(partitions),
+		ReplicationFactor: 1,
+	}); err != nil && !isTopicAlreadyExists(err) {
+		return fmt.Errorf("create topic %s: %w", topic, err)
+	}
+
+	// Wait for metadata to propagate so the subsequent group join sees the partitions.
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		parts, err := ctrlConn.ReadPartitions(topic)
+		if err == nil && len(parts) >= int(partitions) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("topic %s not visible after 15s (partitions=%d)", topic, len(parts))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+}
+
+func isTopicAlreadyExists(err error) bool {
+	var kerr kafka.Error
+	if errors.As(err, &kerr) {
+		return kerr == kafka.TopicAlreadyExists
+	}
+	return strings.Contains(err.Error(), "already exists")
+}
+
+// IsClusterMode reports whether this producer publishes to a real Kafka cluster.
+// Memory-mode producers (empty broker list) are process-local: messages published to
+// them can never be consumed by another service instance, so callers that fan out
+// across processes MUST treat them as "no producer" and take a direct path instead.
+func (p *Producer) IsClusterMode() bool {
+	return p != nil && p.writer != nil
+}
+
 // Close closes the producer connection
 func (p *Producer) Close() error {
 	if p.closed.Swap(true) {
@@ -126,12 +208,30 @@ func NewConsumer(brokers []string, groupID, topic string) *Consumer {
 			MinBytes:       10e3, // 10KB
 			MaxBytes:       10e6, // 10MB
 			CommitInterval: time.Second,
-			StartOffset:    kafka.LastOffset,
+			// FirstOffset (not LastOffset): a push task that is skipped is a message the
+			// client never receives. Starting at the beginning means a consumer that joins
+			// after the first messages were produced still processes them; duplicates are
+			// absorbed by client_msg_id idempotency and seq-based sync.
+			StartOffset: kafka.FirstOffset,
 		})
 		c.reader = r
 	}
 
 	return c
+}
+
+// IsFetching reports whether the reader is actively pulling from a partition assignment.
+//
+// kafka-go does not expose the group assignment directly, but a member that received no
+// partitions never issues a fetch request, so a non-zero fetch counter is a reliable
+// liveness signal. A reader that joined the group before its topic existed stays at zero
+// forever and delivers nothing while looking perfectly healthy from the outside.
+func (c *Consumer) IsFetching() bool {
+	if c == nil || c.reader == nil {
+		return false
+	}
+	stats := c.reader.Stats()
+	return stats.Fetches > 0 || stats.Messages > 0
 }
 
 // Start consumes messages and invokes the handler
@@ -142,6 +242,7 @@ func (c *Consumer) Start(ctx context.Context, handler func(msg Message) error) {
 	if c.reader != nil {
 		go func() {
 			defer c.reader.Close()
+			consecutiveErrs := 0
 			for {
 				select {
 				case <-ctx.Done():
@@ -152,10 +253,16 @@ func (c *Consumer) Start(ctx context.Context, handler func(msg Message) error) {
 						if errors.Is(err, context.Canceled) || c.closed.Load() {
 							return
 						}
-						// If read fails (e.g. broker offline), fall back to memory channel
+						// Never swallow read failures silently: a consumer stuck here looks
+						// perfectly healthy from the outside while delivering nothing.
+						consecutiveErrs++
+						if consecutiveErrs == 1 || consecutiveErrs%20 == 0 {
+							log.Printf("[Kafka Consumer] Read error on topic %s (attempt %d): %v", c.topic, consecutiveErrs, err)
+						}
 						time.Sleep(500 * time.Millisecond)
 						continue
 					}
+					consecutiveErrs = 0
 
 					msg := Message{
 						Topic:     m.Topic,
