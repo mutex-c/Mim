@@ -63,7 +63,19 @@ func (s *Service) SaveFile(uploaderID uint64, fileName, fileType string, data []
 	size := uint64(len(data))
 
 	// 1. Check if hash + size exists (Instant Upload / 秒传)
+	// Reuse existing physical file on disk, but save record with current uploader and filename
 	if existing, found, _ := s.CheckFileExists(hash, size); found {
+		record := models.FileRecord{
+			FileHash:    hash,
+			FileName:    fileName,
+			FileSize:    size,
+			FileType:    fileType,
+			StoragePath: existing.StoragePath,
+			UploaderID:  uploaderID,
+		}
+		if err := s.db.Create(&record).Error; err == nil {
+			return &record, nil
+		}
 		return existing, nil
 	}
 

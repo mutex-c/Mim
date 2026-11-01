@@ -137,8 +137,8 @@ func (s *AIService) SaveAIConfig(userID uint64, cfg *AIConfig) error {
 
 	rec.Provider = cfg.Provider
 	rec.BaseURL = cfg.BaseURL
-	// Preserve existing API key if incoming key is empty
-	if trimmedKey != "" {
+	// Preserve existing API key if incoming key is empty or is a masked placeholder
+	if trimmedKey != "" && !strings.Contains(trimmedKey, "******") {
 		rec.APIKey = trimmedKey
 	}
 	rec.Model = cfg.Model
