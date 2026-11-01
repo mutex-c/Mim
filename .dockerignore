@@ -1,0 +1,28 @@
+# 构建上下文 = 仓库根目录 (Mim/)
+.git
+.idea
+.superpowers
+.vscode
+
+# 依赖与产物 (镜像内部会重新构建)
+**/node_modules
+**/dist
+**/target
+backend/bin
+backend/uploads
+uploads
+scratch
+
+# 不需要进入镜像的客户端/文档
+clients/android
+docs
+
+# 本地数据库与日志
+*.db
+*.db-shm
+*.db-wal
+dump.rdb
+*.log
+*.exe
+*.test
+*.out

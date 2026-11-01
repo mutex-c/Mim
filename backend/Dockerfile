@@ -1,15 +1,29 @@
 # ==========================================
-# 1. 编译阶段 (Multi-Stage Builder)
+# 0. 前端构建阶段 (Web / Desktop 客户端)
 # ==========================================
-FROM golang:1.26-alpine AS builder
+# 必须和 Go 二进制打进同一个镜像：mim-server 以 ./dist 为根目录托管 Web 客户端，
+# 缺少产物时容器依然 healthy，但首页直接 404。
+FROM docker.m.daocloud.io/library/node:20-alpine AS web-builder
+WORKDIR /web
+
+COPY clients/desktop-web/package.json clients/desktop-web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY clients/desktop-web/ ./
+RUN npm run build
+
+# ==========================================
+# 1. Go 编译阶段
+# ==========================================
+FROM docker.m.daocloud.io/library/golang:1.26-alpine AS builder
 WORKDIR /build
 
 RUN apk add --no-cache git
 
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY backend/ ./
 
 # 编译所有微服务与单体二进制 (纯 Go 静态编译 CGO_ENABLED=0)
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/mim-server ./cmd/server && \
@@ -18,9 +32,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/mim-server 
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/mim-transfer ./cmd/transfer
 
 # ==========================================
-# 2. 生产运行镜像 (Production Runner)
+# 2. 生产运行镜像
 # ==========================================
-FROM alpine:3.19 AS runner
+FROM docker.m.daocloud.io/library/alpine:3.19 AS runner
 WORKDIR /app
 
 RUN apk add --no-cache ca-certificates tzdata \
@@ -33,9 +47,8 @@ COPY --from=builder /build/bin/mim-gateway ./mim-gateway
 COPY --from=builder /build/bin/mim-logic ./mim-logic
 COPY --from=builder /build/bin/mim-transfer ./mim-transfer
 
-# 前端静态资源：mim-server 以 ./dist 为根目录托管 Web 客户端
-# (缺少这一步时 /app/dist 是空目录，首页直接 404)
-COPY dist ./dist
+# 前端静态资源
+COPY --from=web-builder /web/dist ./dist
 
 # 目录与权限初始化
 RUN mkdir -p uploads logs && \
