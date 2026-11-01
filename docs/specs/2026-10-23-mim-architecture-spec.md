@@ -1,69 +1,91 @@
-# Mim (M Instant Message) 架构设计与技术规范规范文档 (Architecture Spec)
+# Mim (M Instant Message) 架构设计与技术规范文档 (Architecture Spec)
 
 ---
 
-## 1. 系统整体架构与拓扑
+## 1. 系统整体架构与组件拓扑
 
-### 1.1 总体架构图
+### 1.1 双模演化架构设计哲学
+Mim 采用 **双模演化架构（Dual-Mode Architecture）**，一套业务代码同时支持极简单体与分布式微服务集群：
+1. **轻量单体模式 (`mim-server`)**：
+   * 单一二进制文件，集成 SQLite WAL 存储，支持 Redis 路由与本地内存降级模式，适合边缘计算、内网隔离与私有化极简交付（内存占用 < 30MB）。
+2. **分布式微服务集群模式 (`mim-gateway` + `mim-logic` + `mim-transfer`)**：
+   * **长连接网关层 (`mim-gateway`)**：纯无状态长连接集群，零数据库直连，维持海量 WebSocket 连接；处理 24 字节协议帧解包，通过 gRPC 负载均衡转发至 Logic 集群，并暴露内部 gRPC 推送端口供 Transfer / Logic 反向推送；
+   * **业务逻辑层 (`mim-logic`)**：无状态 gRPC 服务集群，负责 JWT 鉴权、消息持久化落库、敏感词过滤、会话流转与分布式序列号分配，并将推送任务投递至 Kafka 管道；
+   * **异步推送削峰层 (`mim-transfer`)**：消费 Kafka `mim_msg_push` 主题，查阅 Redis 在线路由表，通过 gRPC 将推送帧分发至目标网关节点，实现大群推送与高并发瞬时流量削峰；
+   * **服务治理与注册发现 (`Etcd v3`)**：各微服务实例基于租约心跳（Lease + KeepAlive）自动注册至 `/mim/services/{logic,gateway}`，网关与 Transfer 动态感知节点变动并实现加权/轮询负载均衡；
+   * **分布式协同底座 (`Redis 7`)**：维护跨节点多端在线路由表、执行原子 `INCR` 会话递增序列号、并通过 PubSub (`mim:channel:kickout`) 驱动跨节点同端设备互踢（FR-AUTH-03）；
+   * **企业级关系数据库 (`MySQL 8`)**：支持事务隔离、连接池优化与分表索引，平滑替代 SQLite 单机写限制；
+   * **生产级监控度量 (`Prometheus`)**：网关与服务端统一暴露 `/metrics` 采集端点，涵盖连接数、吞吐量、回执计数与延迟直方图。
 
-```
-                             ┌────────────────────────┐
-                             │   三端客户端集群        │
-                             │  Web / Windows / Android│
-                             └───────────┬────────────┘
-                                         │ HTTPS / WSS (Protobuf 二进制帧)
-                                         ▼
-                             ┌────────────────────────┐
-                             │    mim-gateway 网关    │
-                             │ (反向代理/鉴权/动态路由)│
-                             └───────────┬────────────┘
-               ┌─────────────────────────┼─────────────────────────┐
-               │ gRPC                    │ gRPC                    │ gRPC
-               ▼                         ▼                         ▼
-      ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-      │  mim-auth 认证  │       │  mim-user 用户  │       │  mim-chat 对话  │
-      │ (JWT/设备互踢)  │       │ (资料/关系链)   │       │(时序Seq/ACK/WS) │
-      └────────┬────────┘       └────────┬────────┘       └────────┬────────┘
-               │                         │                         │
-               ├─────────────────────────┼─────────────────────────┤
-               │ gRPC                    │ gRPC                    │ gRPC
-               ▼                         ▼                         ▼
-      ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-      │ mim-group 群组  │       │  mim-file 文件  │       │mim-settings配置 │
-      │ (RBAC/动态禁言) │       │(分块/秒传/防盗) │       │ (系统参数/AI)   │
-      └────────┬────────┘       └────────┬────────┘       └────────┬────────┘
-               │                         │                         │
-               └─────────────────────────┼─────────────────────────┘
-                                         │ 异步事件驱动 (Kafka 削峰)
-                                         ▼
-                                ┌─────────────────┐
-                                │  mim-log 日志   │ ◄─── OpenTelemetry (TraceId)
-                                │ (审计/IP分析)   │
-                                └─────────────────┘
- ─────────────────────────────────────────────────────────────────────────────
- 基础设施层 (Middleware):
-  • 注册发现: Etcd v3         • 缓存与在线状态: Redis 7 Cluster
-  • 关系数据库: MySQL 8.0      • 消息队列: Kafka 3.x
-  • 链路追踪: Jaeger          • 指标监控: Prometheus + Grafana
+### 1.2 系统拓扑图 (Distributed Cluster Mode)
+
+```text
+                                  ┌────────────────────────┐
+                                  │    三端客户端集群      │
+                                  │ Web / Desktop / Android│
+                                  └───────────┬────────────┘
+                                              │ WSS (24B 定长二进制帧) / HTTPS
+                                              ▼
+                             ┌─────────────────────────────────┐
+                             │       4层 / 7层 负载均衡        │
+                             │         (Nginx / L4 LB)         │
+                             └──────────┬───────────┬──────────┘
+                                        │           │
+                    ┌───────────────────┘           └───────────────────┐
+                    ▼                                                   ▼
+         ┌─────────────────────┐                             ┌─────────────────────┐
+         │ mim-gateway (节点 1) │                             │ mim-gateway (节点 N) │
+         │  • WebSocket 管理   │                             │  • WebSocket 管理   │
+         │  • 24B 协议编解码   │                             │  • 24B 协议编解码   │
+         │  • 内部 gRPC 8082   │                             │  • 内部 gRPC 8082   │
+         │  • /metrics 监控    │                             │  • /metrics 监控    │
+         └──────────┬──────────┘                             └──────────┬──────────┘
+                    │                                                   │
+                    ├─────────────────┐               ┌─────────────────┤
+                    │ gRPC 请求       │ gRPC 请求     │ gRPC 请求       │ gRPC 请求
+                    ▼                 ▼               ▼                 ▼
+         ┌─────────────────────────────────────────────────────────────────────────┐
+         │                         mim-logic 集群 (无状态 gRPC)                    │
+         │  • 统一鉴权 (JWT)           • DFA 敏感词过滤       • 会话单调 SeqId 分配 │
+         │  • 增量同步 (Sync)          • 3段式 ACK 状态机     • WebRTC 信令中继    │
+         └───────────────┬───────────────────┬───────────────────┬─────────────────┘
+                         │ 读写数据          │ 租约注册/发现     │ 投递推送任务
+                         ▼                   ▼                   ▼
+                 ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+                 │ MySQL 8 / DB  │   │    Etcd v3    │   │   Kafka 3.x   │
+                 │ (读写连接池)  │   │  (服务注册发现)│   │ (mim_msg_push)│
+                 └───────┬───────┘   └───────┬───────┘   └───────┬───────┘
+                         │                   │                   │
+                         │                   │                   ▼ 批量消费削峰
+                         │                   │           ┌───────────────┐
+                         │                   │           │ mim-transfer  │
+                         │                   │           │ (推送调度集群)│
+                         │                   │           └───────┬───────┘
+                         │                   │                   │ gRPC PushMessage
+                         │                   │                   ▼
+                         │           ┌───────┴───────┐   ┌───────────────────────┐
+                         └──────────►│    Redis 7    │◄──┤ mim-gateway 节点推送  │
+                                     │ • 在线路由表  │   └───────────────────────┘
+                                     │ • 原子 INCR   │
+                                     │ • 踢人 PubSub │
+                                     └───────────────┘
 ```
 
 ---
 
-## 2. 通信协议规范 (Protobuf 二进制传输契约)
+## 2. 通信协议规范 (Packet Framing & gRPC 契约)
 
-为保证网络吞吐量并防止数据膨胀，Mim 彻底废弃普通 JSON 字符串传输，全面采用 **自定义二进制帧头 + Protobuf 负载** 机制。
+### 2.1 自定义 24 字节定长二进制帧结构
 
-### 2.1 自定义二进制数据帧结构 (Packet Framing, 24 字节 8 字节严格对齐)
+每个长连接数据包均按以下定长 24 字节帧头封包，多字节数值强制采用网络字节序（Big-Endian / 大端序）：
 
-每个 WebSocket / TCP 数据包均按以下定长 24 字节帧头封包，**所有多字节字段全量强制采用网络字节序（Big-Endian / 大端序）**：
-
-```
+```text
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |          Magic (2B)           |  Version (1B) |   Flags (1B)  |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|         CmdType (2B)          |         Reserved (2B)         | <-- 8字节对齐填充
+|         CmdType (2B)          |         Reserved (2B)         | <-- 8字节边界对齐填充
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
 +                       Sequence ID (8B)                        + <-- 严格落在 Offset 8 边界
@@ -73,393 +95,315 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                      CRC32 Checksum (4B)                      |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     Payload (Protobuf Data)                   |
+|                     Payload (Protobuf / JSON)                 |
 |                              ...                              |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
-* **Magic (魔数, 2 Bytes, 大端序)**: 固定为 `0x4D49` (ASCII: 'M', 'I')，用于快速过滤非法连接与探测。
-* **Version (版本号, 1 Byte)**: 协议版本，初始为 `0x01`。
-* **Flags (标志位, 1 Byte)**: `Bit 0`: 是否压缩 (Gzip/Snappy), `Bit 1`: 是否端到端加密 (E2EE), 其余保留。
-* **CmdType (命令字, 2 Bytes, 大端序)**:
+* **Magic (魔数, 2 Bytes)**: 固定为 `0x4D49` (ASCII: 'M', 'I')，用于快速过滤非法连接与网络扫描。
+* **Version (版本号, 1 Byte)**: 协议版本，当前为 `0x01`。
+* **Flags (标志位, 1 Byte)**:
+  * `0x00`: 标准 Protobuf 二进制负载
+  * `0x04`: JSON 文本编码负载 (`FlagJSON`，兼顾前端/多端高可读性与无缝解析)
+* **CmdType (命令字, 2 Bytes)**:
   * `0x0001`: 心跳 PING / `0x0002`: 心跳 PONG
-  * `0x0010`: 认证握手请求 / `0x0011`: 认证握手响应
-  * `0x0100`: 单聊消息发送 / `0x0101`: 单聊消息推送 / `0x0102`: 消息投递 ACK
-  * `0x0200`: 群聊消息发送 / `0x0201`: 群聊消息广播
-  * `0x0300`: 增量消息拉取同步 (Sync Request) / `0x0301`: 同步响应 (Sync Response)
-  * `0x0302`: 批量多会话同步请求 (Batch Sync) / `0x0303`: 批量同步响应
-  * `0x0400`: 消息撤回通知 / `0x0401`: 消息已读回执
-  * `0x0500`: WebRTC 临时信令交互 (Offer/Answer/Candidate/Hangup，仅内存路由中继，绝不落库)
-* **Reserved (保留位, 2 Bytes, 大端序)**: 填充对齐字节（固定为 `0x0000`），确保后续 8 字节 `SeqId` 严格处于 64 位内存对齐边界（Offset 8），杜绝跨字长内存拆分读取开销。
-* **Sequence ID (8 Bytes, 大端序)**: 会话内单调严格自增序号（从 Offset 8 开始，完美对齐）。
-* **Payload Length (4 Bytes, 大端序)**: 负载二进制字节长度。
-* **CRC32 (4 Bytes, 大端序)**: 针对 Payload 计算的标准 IEEE 802.3 校验和，防止网络乱序或数据篡改。
-* **Payload**: Google Protobuf 序列化后的真实二进制数据。
+  * `0x0006`: 同端挤占互踢通知 (`CmdKickOut`, FR-AUTH-03)
+  * `0x0100`: 客户端消息发送 (`CmdChatMessageSend`)
+  * `0x0101`: 服务端消息推送 (`CmdChatMessagePush`)
+  * `0x0102`: 服务端接收确认 (`CmdMessageAck`, SENT - 状态1)
+  * `0x0103`: 客户端送达回执 (`CmdDeliveryAck`, DELIVERED - 状态2)
+  * `0x0300`: 增量消息拉取同步 (`CmdSyncReq`)
+  * `0x0301`: 同步响应 (`CmdSyncResp`)
+  * `0x0400`: 消息撤回通知 (`CmdRevokeNotify`)
+  * `0x0401`: 客户端已读回执 (`CmdReadReceipt`, READ - 状态3)
+  * `0x0500`: WebRTC 信令中继 (`CmdWebRTCSignal`)
+* **Reserved (保留位, 2 Bytes)**: 固定 `0x0000`，确保后续 8 字节 `SeqId` 处于 64 位内存对齐边界。
+* **Sequence ID (8 Bytes)**: 会话内单调严格递增序列号（Offset 8 起始）。
+* **Payload Length (4 Bytes)**: 负载二进制字节长度。
+* **CRC32 (4 Bytes)**: 针对 Payload 计算的标准 IEEE 802.3 校验和，防止网络乱序或数据篡改。
 
-### 2.2 核心 Protobuf 协议定义 (`mim.proto`)
+### 2.2 gRPC 微服务契约定义 (`protocol/mim.proto`)
 
 ```protobuf
 syntax = "proto3";
 package mim.protocol;
 option go_package = "mim/protocol";
 
-// 消息类型枚举
-enum MessageType {
-  TEXT = 0;
-  MARKDOWN = 1;
-  IMAGE = 2;
-  VOICE = 3;
-  VIDEO = 4;
-  FILE = 5;
-  STICKER = 6;
-  REVOKE = 7;
-  WEBRTC_SIGNAL = 8;
-  SYSTEM_NOTIFICATION = 9;
+// ---------------- 业务逻辑服务 (mim-logic) ----------------
+service LogicService {
+  // 发送消息 (网关 -> Logic): 持久化、生成SeqID、进入Kafka推送流水线
+  rpc SendMessage(ChatMessage) returns (MessageAck);
+  // 增量同步消息 (网关 -> Logic)
+  rpc SyncMessages(SyncRequest) returns (SyncResponse);
+  // 处理接收方送达ACK (DELIVERED)
+  rpc ProcessDeliveryAck(DeliveryAck) returns (MessageAck);
+  // 处理接收方已读回执 (READ)
+  rpc ProcessReadReceipt(ReadReceipt) returns (MessageAck);
+  // 边缘鉴权握手验证
+  rpc VerifyToken(AuthHandshake) returns (AuthHandshakeResp);
 }
 
-// 会话类型
-enum ConversationType {
-  SINGLE = 0;
-  GROUP = 1;
+// ---------------- 网关推送服务 (mim-gateway) ----------------
+service GatewayService {
+  // 推送消息给网关上的指定用户连接 (Transfer/Logic -> 网关)
+  rpc PushMessage(GatewayPushReq) returns (GatewayPushResp);
+  // 踢除网关上的指定平台设备连接 (跨节点互踢)
+  rpc KickDevice(GatewayKickReq) returns (GatewayKickResp);
+  // 广播数据帧至多用户
+  rpc Broadcast(GatewayBroadcastReq) returns (GatewayBroadcastResp);
 }
 
-// 核心消息结构
-message ChatMessage {
-  int64 msg_id = 1;               // 服务端全局唯一 Snowflake ID
-  string client_msg_id = 2;       // 客户端本地生成的 UUID，用于幂等去重
-  string conversation_id = 3;     // 会话ID (单聊: min_max格式, 群聊: 群ID)
-  ConversationType conv_type = 4;
-  int64 sender_id = 5;
-  int64 receiver_id = 6;          // 单聊为对方ID，群聊为0
-  MessageType msg_type = 7;
-  string content = 8;             // 文本内容或媒体元数据(JSON/URL)
-  
-  // 引用与回复
-  QuoteInfo quote = 9;
-  
-  // 消息时序Seq
-  int64 seq_id = 10;              // 会话内连续递增序号
-  int64 send_time = 11;           // 毫秒时间戳
-  
-  // 安全与扩展
-  bool is_encrypted = 12;         // 是否端到端加密
-}
-
-message QuoteInfo {
-  int64 quoted_msg_id = 1;
-  int64 quoted_seq_id = 2;
-  int64 quoted_user_id = 3;
-  string quoted_user_name = 4;
-  string preview_content = 5;
-}
-
-// 客户端投递确认 ACK
-message MessageAck {
+// ---------------- 状态与回执传输结构 ----------------
+message DeliveryAck {
   string client_msg_id = 1;
-  int64 msg_id = 2;
-  int64 seq_id = 3;
-  int32 code = 4;                 // 0: 成功, 其他: 错误码
-  string error_msg = 5;
-  int64 server_time = 6;
+  string conversation_id = 2;
+  uint64 seq_id = 3;
+  int64 delivered_time = 4;
 }
 
-// 增量同步请求 (断网重连/换设备离线拉取)
-message SyncRequest {
+message ReadReceipt {
   string conversation_id = 1;
-  int64 last_seq_id = 2;          // 客户端本地已同步的最大 SeqId
-  int32 limit = 3;                // 单次拉取数量 (默认 50)
+  uint64 read_seq_id = 2;
+  uint64 user_id = 3;
+  int64 read_time = 4;
 }
 
-message SyncResponse {
-  string conversation_id = 1;
-  repeated ChatMessage messages = 2;
-  bool has_more = 3;
-  int64 latest_seq_id = 4;
-}
-
-// WebRTC 信令
-message WebRTCSignal {
-  string call_id = 1;
-  int64 from_user_id = 2;
-  int64 to_user_id = 3;
-  string signal_type = 4;         // OFFER, ANSWER, CANDIDATE, REJECT, HANGUP
-  string data = 5;                // SDP 或 Candidate JSON 字符串
+message KickOutNotify {
+  uint64 user_id = 1;
+  string platform = 2;
+  string new_device_id = 3;
+  string reason = 4;
+  int64 kick_time = 5;
 }
 ```
 
 ---
 
-## 3. 金融级消息可靠性设计 (Message Reliability Engine)
+## 3. 并发安全与消息可靠性机制
 
-为彻底解决传统教学项目中“发消息偶发丢失”、“弱网重试导致重复消息”、“断网重连后消息顺序错乱”的死穴，Mim 实现一套工业级消息投递保证机制。
+### 3.1 客户端连接池并发安全 (SafeSend 机制)
+在原生 Go 长连接编程中，客户端网络闪断与心跳超时可能导致 `Client.Close()` 关闭底层 Channel。若服务端其他协程此时并发调用 `SendChan <- data`，将引发未捕获的 `panic: send on closed channel` 导致整个进程崩溃。
 
+Mim 在 `Client` 结构体内引入 **双重状态保护 (Atomic Bool + sync.RWMutex)**：
+```go
+func (c *Client) Send(data []byte) bool {
+    if c.closed.Load() {
+        return false
+    }
+    c.sendMu.RLock()
+    defer c.sendMu.RUnlock()
+
+    if c.closed.Load() {
+        return false
+    }
+
+    select {
+    case c.SendChan <- data:
+        return true
+    default:
+        // 通道满时的背压与非阻塞丢弃保护
+        return false
+    }
+}
 ```
- 客户端 A (发送端)            mim-chat 服务 (集群)              客户端 B (接收端)
-     │                                │                                │
- 1.  ├──── 发送 (带 client_msg_id) ───>│                                │
-     │                                │ 2. Redis 幂等校验 (防重发)      │
-     │                                │ 3. 生成会话自增 SeqId           │
-     │                                │ 4. 异步写入 Kafka / MySQL       │
- 5.  │<─── 回传 MessageAck (带SeqId) ──┤                                │
-     │                                │ 6. 路由查找 B 的在线节点(Redis) │
-     │                                ├──── 实时推送 ChatMessage ─────>│ 7.
-     │                                │                                │ 8. 校验 Seq 连续性
-     │                                │<─── 回传 ReceiveACK ───────────┤ 9.
-     │                                │ 10. 标记消息为 DELIVERED       │
+* `Close()` 执行时先获取排他写锁 `c.sendMu.Lock()` 并标记 `c.closed.Store(true)`，彻底消除并发关闭与写入的竞争窗口。
+
+### 3.2 客户端幂等去重
+* 客户端发送消息携带唯一 `client_msg_id (UUID)`。
+* 服务端在插入消息前，首先通过本地唯一约束与查询校验 `client_msg_id`：若已存在，直接返回已生成的 ACK 与对应的 `seq_id`，防止弱网环境客户端自动重发导致消息重复入库。
+
+### 3.3 分布式原子时序 (SeqId)
+* 每一会话（单聊或群聊）拥有独立的递增时序。
+* **Redis 原子 `INCR`**：键名为 `mim:conv:{conv_id}:seq`。当键不存在时，从数据库执行 `SELECT COALESCE(MAX(seq_id), 0) FROM mim_messages WHERE conversation_id = ?` 进行基线预热，再通过 Redis 事务原子递增。
+* **双模降级能力**：在无 Redis 的单体环境下，自动降级为进程内读写锁 + DB 预热递增，确保单节点环境下的单调递增性与快速分配。
+
+### 3.4 完整 3 段式 ACK 状态机
+Mim 实现了端到端严格确认机制：
+```text
+ 发送端 A                    服务端 (Logic / Gateway)                  接收端 B
+    │                                  │                                  │
+    ├─── CmdChatMessageSend (0x0100) ──►│                                  │
+    │                                  │ 1. 落库 (status=1 SENT)          │
+    │                                  │ 2. 分配 SeqID                    │
+    │◄── CmdMessageAck (0x0102) ───────┤ 3. 发布 Kafka 推送任务           │
+    │    (状态更新: 已发送)            ├─── CmdChatMessagePush (0x0101) ──►│
+    │                                  │                                  │
+    │                                  │                                  │ 收到推送帧
+    │                                  │◄── CmdDeliveryAck (0x0103) ──────┤
+    │                                  │ 4. 状态更新: status=2 DELIVERED  │
+    │◄── 转发已送达通知 ───────────────┤                                  │
+    │    (状态更新: 已送达)            │                                  │
+    │                                  │                                  │ 进入会话/查看
+    │                                  │◄── CmdReadReceipt (0x0401) ──────┤
+    │                                  │ 5. 状态更新: status=3 READ       │
+    │◄── 转发已读通知 ─────────────────┤ 6. 更新已读游标 max_read_seq     │
+    │    (状态更新: 已读)              │                                  │
 ```
 
-### 3.1 核心机制与算法
-1. **客户端消息幂等性 (Idempotency)**：
-   * 客户端每次生成唯一的 `client_msg_id (UUID v4)`。
-   * 服务端在 Redis 中维护一个 `SetNX(client_msg_id, 1, ex=600s)` 的滑动去重窗口。
-   * 若发生弱网重试，服务端直接返回先前的 ACK 确认，绝不重复写入 MySQL 数据库。
+### 3.5 同端挤占互踢机制 (FR-AUTH-03)
+* 当用户在相同平台（例如同为 `web` 或同为 `android`）建立新连接时：
+  * **单机内**：Hub 检出已有的同端连接，下发 `CmdKickOut (0x0006)` 携带 `reason: "Account logged in on another device"` 与 `new_device_id`，随后关闭旧连接。
+  * **跨节点集群**：通过 Redis PubSub (`mim:channel:kickout`) 广播踢人事件，各网关节点的订阅协程命中本地 Client 并执行精准驱逐。
 
-2. **会话单调递增 SeqId (允许空洞，严禁假设严格连续)**：
-   * 使用 Redis `INCR mim:seq:<conversation_id>` 原子递增计数器。
-   * **工程容错说明**：在分布式环境下，INCR 成功后若发生事务回滚或网络异常，序号允许产生空洞（如 1, 2, 4）。客户端同步协议严禁校验 `seq == prev + 1`，而是基于 `seq > last_seq_id` 进行单调自增范围拉取，确保永远不会因偶发空洞导致同步死锁。
-
-3. **会话预览并发乱序更新守卫 (CAS / Seq Guard)**：
-   * 为防止网络抖动导致的后到旧消息覆盖最新会话列表预览，更新 `mim_conversations` 表时强制加入 Seq 比较守卫：
-     ```sql
-     UPDATE mim_conversations 
-     SET last_msg_id = ?, last_msg_preview = ?, last_msg_time = ?, last_msg_seq = ?
-     WHERE id = ? AND last_msg_seq < ?;
-     ```
-
-4. **会话写扩散 + 消息单份存储架构 (准确定义)**：
-   * **单聊 (1v1)**：采用**会话状态双向写扩散 + 消息单份存储**。收发双方在 `mim_conversations` 表中各持有一条记录（独立维护自己的置顶、免打扰、未读数与已读最大 SeqId），而底层消息在 `mim_messages` 中仅存一份，既支撑了双方的独立状态管理，又规避了全量消息冗余写入。
-   * **群聊 (Group)**：采用**纯读扩散**。群消息落库单份，群成员仅维护各自的 `read_seq_id` 游标，杜绝千人大群由于写扩散导致存储与 IO 瞬间雪崩。
-
-5. **多端状态机与已送达 (Delivered) / 已读 (Read) 归属定义**：
-   * **Sent (已发送)**：消息成功到达服务端并完成落库，服务端回传 `MessageAck` 给发送端。
-   * **Delivered (已送达)**：接收方多端（Web、Windows、Android）在线时，**只要任意一台活跃设备回复了 ReceiveACK**，服务端即刻将消息状态推进为 Delivered。
-   * **Read (已读)**：接收方在任意一台设备打开该会话并推进 `last_read_seq`，服务端广播 `ReadReceipt`，并将未读数清零事件同步至接收方的其他全部在线设备。
-
-6. **E2EE 端到端加密与服务端功能边界**：
-   * **明确界定**：E2EE 仅作为 **1v1 单聊专属可选插件**。
-   * **互斥与降级规则**：当单聊开启 E2EE 时，会话在客户端完成 ECDH 密钥协商与 AES-256-GCM 加密，服务端退化为纯盲中继管道（Zero-Knowledge）。此时**自动旁路跳过服务端 DFA 敏感词过滤与 AI 会话分析**；AI 总结/摘要仅对**未加密的团队协作群聊**开放。
-
-7. **WebRTC 临时信令与持久化存储完全解耦**：
-   * WebRTC 的 `Offer`、`Answer`、`Candidate` 属于高频网络穿透与媒体协商信令（走专属命令字 `0x0500`），由连接池 `Hub` 在内存中纯路由中继转发，**坚决不插入 `mim_messages` 表**；
-   * 仅在通话正常挂断或异常超时时，由服务端生成一条类型为 `SYSTEM_NOTIFICATION` 的轻量通话记录（记录通话时长）落库。
-
-8. **增量离线同步与批量多会话同步 (Batch Sync)**：
-   * **单会话同步**：客户端连接后发送 `SyncRequest(last_seq_id)`，服务端执行 `SELECT * FROM mim_messages WHERE conversation_id = ? AND seq_id > ? ORDER BY seq_id ASC LIMIT ?`。
-   * **批量多会话同步 (Batch Sync)**：客户端登录后一次性上送所有活跃会话的 `{conv_id: last_seq}` 游标映射，服务端在 1 次网络往返（1 Round-trip）中返回全部差量包，极大降低移动端弱网连接消耗。
+### 3.6 Kafka 消息削峰与推送管线
+* 业务逻辑服务 `mim-logic` 在接收并持久化消息后，将推送任务打包投递至 Kafka `mim_msg_push` 主题。
+* 推送服务 `mim-transfer` 采用 Consumer Group 并行批量消费：
+  * 针对单聊：直接查路由表获取接收方网关并调用 gRPC `PushMessage`；
+  * 针对大群聊：将群成员按网关节点分组批量分发，避免大群突发消息冲击数据库或导致长连接拥塞。
 
 ---
 
-## 4. 数据库物理模型设计 (MySQL 8.0 DDL)
+## 4. 全链路安全与防越权架构 (Security Architecture)
 
-采用前缀 `mim_` 规范命名，字符集 `utf8mb4`，时区 `UTC`。
+### 4.1 统一凭据鉴权 (JWT)
+* 全面弃用开发期的 `?user_id=1` 调试后门，HTTP 路由与 WebSocket 握手强制校验 JWT。
+* 支持通过 `Authorization: Bearer <token>` 标头或 `?token=<token>` 参数传递有效凭据。
+* 密钥支持通过环境变量 `MIM_JWT_SECRET` 注入，杜绝源码硬编码泄露风险。
+
+### 4.2 会话隔离与水平越权防护 (IDOR)
+* 对所有涉及会话内容的敏感接口（消息记录拉取、消息撤回、消息物理删除、清空会话）执行前置鉴权：
+  * **单聊 (`minID_maxID`)**：严格验证请求发起人 `userID` 是否为会话双方之一。
+  * **群聊 (`group_id`)**：严格验证请求发起人是否为 `mim_group_members` 表中的有效成员。
+* 删除消息与撤回消息额外校验是否为消息发送本人（群主/管理员拥有群内管理权限）。
+
+### 4.3 静态文件防盗链与路径沙箱
+* **防盗链签名**：文件上传后生成 HMAC-SHA256 签名 Token（绑定 `file_id` 与防篡改密钥）。
+* **下载鉴权**：文件下载接口接受 `?sign=` 签名或有效用户 JWT，未授权遍历请求均被拦截（返回 401 Unauthorized）。
+* **路径沙箱隔离**：对存储物理路径进行 `filepath.Clean` 规范化，并强制验证目标路径处于 `uploads/` 存储沙箱之内，杜绝 `../` 目录穿越风险。
+
+### 4.4 AI 密钥与敏感信息脱敏
+* 用户的私有大模型 API Key（OpenAI / DeepSeek 等）在存储后，API 接口读取时自动进行掩码处理（如 `sk-******abcd`）。
+* 前端更新配置时若提交包含 `******` 的掩码串，服务端自动保留已有的真实密钥，防止秘钥泄露与误覆盖。
+
+---
+
+## 5. 存储模型与数据库设计 (MySQL 8 / SQLite 3)
+
+系统基于 GORM 提供多数据库引擎抽象支持，由 `db-driver` 配置项控制 (`sqlite` 或 `mysql`)。
+
+### 5.1 核心表结构定义 (MySQL 8 DDL 规范)
 
 ```sql
--- 1. 用户基础表
+-- 1. 用户基础表 (mim_users)
 CREATE TABLE `mim_users` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '用户ID',
-  `account` VARCHAR(32) NOT NULL COMMENT '用户唯一账号',
-  `nickname` VARCHAR(64) NOT NULL COMMENT '用户昵称',
-  `password_hash` VARCHAR(128) NOT NULL COMMENT '密码bcrypt哈希',
-  `avatar` VARCHAR(255) DEFAULT '' COMMENT '头像URL',
-  `signature` VARCHAR(255) DEFAULT '' COMMENT '个性签名',
-  `email` VARCHAR(128) DEFAULT '' COMMENT '绑定邮箱',
-  `phone` VARCHAR(32) DEFAULT '' COMMENT '绑定手机',
-  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1正常 2禁言 3封禁',
-  `role` TINYINT NOT NULL DEFAULT 1 COMMENT '1普通用户 2管理员',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at` DATETIME DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_account` (`account`),
-  KEY `idx_phone` (`phone`),
-  KEY `idx_email` (`email`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
-
--- 2. 用户个性化配置表 (防骚扰/加好友验证)
-CREATE TABLE `mim_user_configs` (
-  `user_id` BIGINT UNSIGNED NOT NULL COMMENT '关联用户ID',
-  `search_by_account` TINYINT NOT NULL DEFAULT 1 COMMENT '允许账号搜索: 0禁止 1允许',
-  `search_by_nickname` TINYINT NOT NULL DEFAULT 1 COMMENT '允许昵称搜索: 0禁止 1允许',
-  `friend_verify_mode` TINYINT NOT NULL DEFAULT 2 COMMENT '1直接添加 2需要验证 3问答验证 4拒绝添加',
-  `friend_verify_question` VARCHAR(255) DEFAULT '' COMMENT '验证问题',
-  `friend_verify_answer` VARCHAR(255) DEFAULT '' COMMENT '验证答案',
-  `recall_time_limit` INT NOT NULL DEFAULT 120 COMMENT '撤回时效限制(秒)',
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户偏好配置表';
-
--- 3. 好友关系链表
-CREATE TABLE `mim_friends` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
-  `friend_id` BIGINT UNSIGNED NOT NULL COMMENT '好友ID',
-  `remark` VARCHAR(64) DEFAULT '' COMMENT '好友备注',
-  `is_pinned` TINYINT NOT NULL DEFAULT 0 COMMENT '是否置顶 0否 1是',
-  `is_black` TINYINT NOT NULL DEFAULT 0 COMMENT '是否拉黑 0否 1是',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at` DATETIME DEFAULT NULL,
+  `account` VARCHAR(64) NOT NULL UNIQUE,
+  `nickname` VARCHAR(64) NOT NULL DEFAULT '',
+  `avatar` VARCHAR(255) NOT NULL DEFAULT '',
+  `signature` VARCHAR(255) NOT NULL DEFAULT '',
+  `password_hash` VARCHAR(128) NOT NULL,
+  `status` TINYINT NOT NULL DEFAULT 1,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_user_friend` (`user_id`, `friend_id`),
-  KEY `idx_friend_id` (`friend_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='好友关系表';
+  INDEX `idx_users_account` (`account`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. 好友申请验证流转表
-CREATE TABLE `mim_friend_verifications` (
+-- 2. 消息存储表 (mim_messages)
+CREATE TABLE `mim_messages` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `sender_id` BIGINT UNSIGNED NOT NULL COMMENT '申请人ID',
-  `receiver_id` BIGINT UNSIGNED NOT NULL COMMENT '被申请人ID',
-  `verify_msg` VARCHAR(255) DEFAULT '' COMMENT '申请留言',
-  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1待处理 2同意 3拒绝 4忽略',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `client_msg_id` VARCHAR(64) NOT NULL UNIQUE,
+  `conversation_id` VARCHAR(64) NOT NULL,
+  `conv_type` TINYINT NOT NULL,          -- 1: 单聊, 2: 群聊
+  `sender_id` BIGINT UNSIGNED NOT NULL,
+  `receiver_id` BIGINT UNSIGNED NOT NULL,
+  `group_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `msg_type` TINYINT NOT NULL DEFAULT 0,  -- 0: 文本, 1: Markdown, 2: 图片, 3: 语音, 5: 文件
+  `content` LONGTEXT NOT NULL,
+  `seq_id` BIGINT UNSIGNED NOT NULL,
+  `status` TINYINT NOT NULL DEFAULT 1,    -- 1: SENT, 2: DELIVERED, 3: READ, 4: REVOKED
+  `quoted_msg_id` VARCHAR(64) DEFAULT NULL,
+  `quoted_content` VARCHAR(255) DEFAULT NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  KEY `idx_receiver_status` (`receiver_id`, `status`),
-  KEY `idx_sender_receiver` (`sender_id`, `receiver_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='好友申请流转表';
+  UNIQUE KEY `uk_conv_seq` (`conversation_id`, `seq_id`),
+  INDEX `idx_conv_created` (`conversation_id`, `created_at`),
+  INDEX `idx_sender` (`sender_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 5. 会话列表状态表
+-- 3. 会话状态与已读游标表 (mim_conversations)
 CREATE TABLE `mim_conversations` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `conversation_id` VARCHAR(64) NOT NULL COMMENT '会话唯一标识',
-  `user_id` BIGINT UNSIGNED NOT NULL COMMENT '所属用户',
-  `target_id` BIGINT UNSIGNED NOT NULL COMMENT '单聊目标用户ID或群聊ID',
-  `conv_type` TINYINT NOT NULL DEFAULT 0 COMMENT '0单聊 1群聊',
-  `last_msg_id` BIGINT UNSIGNED DEFAULT 0 COMMENT '最新一条消息ID',
-  `last_msg_preview` VARCHAR(255) DEFAULT '' COMMENT '最新消息预览',
-  `last_msg_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `last_read_seq` BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '已读最大SeqId',
-  `unread_count` INT NOT NULL DEFAULT 0 COMMENT '未读数',
-  `is_pinned` TINYINT NOT NULL DEFAULT 0 COMMENT '是否置顶',
-  `is_muted` TINYINT NOT NULL DEFAULT 0 COMMENT '免打扰 0否 1是',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `conversation_id` VARCHAR(64) NOT NULL,
+  `conv_type` TINYINT NOT NULL,
+  `target_id` BIGINT UNSIGNED NOT NULL,
+  `last_msg_id` VARCHAR(64) DEFAULT NULL,
+  `last_content` VARCHAR(255) DEFAULT NULL,
+  `last_msg_time` DATETIME(3) DEFAULT NULL,
+  `last_seq_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `max_read_seq` BIGINT UNSIGNED NOT NULL DEFAULT 0, -- 已读游标
+  `unread_count` INT NOT NULL DEFAULT 0,
+  `is_pinned` TINYINT NOT NULL DEFAULT 0,
+  `is_muted` TINYINT NOT NULL DEFAULT 0,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_user_conv` (`user_id`, `conversation_id`),
-  KEY `idx_user_pinned_time` (`user_id`, `is_pinned`, `last_msg_time`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话元数据表';
-
--- 6. 核心消息表 (单聊与群聊统一读写模型)
-CREATE TABLE `mim_messages` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Snowflake 消息ID',
-  `client_msg_id` VARCHAR(64) NOT NULL COMMENT '客户端防重UUID',
-  `conversation_id` VARCHAR(64) NOT NULL COMMENT '会话ID',
-  `conv_type` TINYINT NOT NULL DEFAULT 0 COMMENT '0单聊 1群聊',
-  `sender_id` BIGINT UNSIGNED NOT NULL COMMENT '发送方ID',
-  `receiver_id` BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '接收方ID(单聊有效)',
-  `seq_id` BIGINT UNSIGNED NOT NULL COMMENT '会话内连续自增序号',
-  `msg_type` TINYINT NOT NULL DEFAULT 0 COMMENT '消息类型 0文本 1MD 2图片 3语音 4视频 5文件 7撤回 8WebRTC',
-  `content` TEXT COMMENT '消息文本或媒体结构体JSON',
-  `quoted_msg_id` BIGINT UNSIGNED DEFAULT 0 COMMENT '引用的父消息ID',
-  `quoted_content` VARCHAR(255) DEFAULT '' COMMENT '引用消息摘要',
-  `is_revoked` TINYINT NOT NULL DEFAULT 0 COMMENT '是否撤回 0否 1是',
-  `is_encrypted` TINYINT NOT NULL DEFAULT 0 COMMENT '是否端到端加密',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_client_msg_id` (`client_msg_id`),
-  UNIQUE KEY `uk_conv_seq` (`conversation_id`, `seq_id`),
-  KEY `idx_conv_created` (`conversation_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息存储表';
-
--- 7. 群组基础表
-CREATE TABLE `mim_groups` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '群ID',
-  `title` VARCHAR(64) NOT NULL COMMENT '群名称',
-  `avatar` VARCHAR(255) DEFAULT '' COMMENT '群头像',
-  `notice` TEXT COMMENT '群公告',
-  `owner_id` BIGINT UNSIGNED NOT NULL COMMENT '群主ID',
-  `member_count` INT NOT NULL DEFAULT 1 COMMENT '当前成员总数',
-  `max_members` INT NOT NULL DEFAULT 500 COMMENT '最大成员上限',
-  `is_searchable` TINYINT NOT NULL DEFAULT 1 COMMENT '是否允许被搜索',
-  `join_mode` TINYINT NOT NULL DEFAULT 2 COMMENT '1自由加入 2需审批 3禁止加入',
-  `is_all_muted` TINYINT NOT NULL DEFAULT 0 COMMENT '是否全员禁言 0否 1是',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `deleted_at` DATETIME DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_owner` (`owner_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群组表';
-
--- 8. 群成员与权限关系表
-CREATE TABLE `mim_group_members` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `group_id` BIGINT UNSIGNED NOT NULL COMMENT '群ID',
-  `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
-  `member_nickname` VARCHAR(64) DEFAULT '' COMMENT '群内昵称',
-  `role` TINYINT NOT NULL DEFAULT 3 COMMENT '1群主 2管理员 3普通成员',
-  `muted_until` DATETIME DEFAULT NULL COMMENT '禁言到期时间(NULL表示未禁言)',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_group_user` (`group_id`, `user_id`),
-  KEY `idx_user_group` (`user_id`, `group_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群成员表';
-
--- 9. 文件与资源元数据表 (秒传与鉴权)
-CREATE TABLE `mim_files` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `file_hash` CHAR(64) NOT NULL COMMENT 'SHA-256 哈希值(用于秒传)',
-  `file_name` VARCHAR(255) NOT NULL COMMENT '原始文件名',
-  `file_size` BIGINT UNSIGNED NOT NULL COMMENT '文件字节大小',
-  `file_type` VARCHAR(64) NOT NULL COMMENT 'MIME类型',
-  `storage_path` VARCHAR(255) NOT NULL COMMENT '存储物理路径或Key',
-  `uploader_id` BIGINT UNSIGNED NOT NULL COMMENT '上传者ID',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_file_hash` (`file_hash`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文件元数据表';
+  INDEX `idx_user_updated` (`user_id`, `updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
+
+### 5.2 数据库连接池调优
+针对高并发即时通信场景，数据库连接池进行了优化配置：
+* `SetMaxOpenConns`: 100（防止瞬时高并发将 MySQL 连接数占满）
+* `SetMaxIdleConns`: 20（保持常驻长连接，降低握手开销）
+* `SetConnMaxLifetime`: 1 小时（避免 MySQL `wait_timeout` 导致的断连故障）
 
 ---
 
-## 5. 三端客户端工程体系设计
+## 6. 生产级可观测性规范 (Prometheus Metrics)
 
-```
-mim/
-├── backend/                  # Go-Zero 微服务后端工程
-│   ├── app/
-│   │   ├── gateway/          # API 网关
-│   │   ├── auth/             # 认证服务 (RPC & API)
-│   │   ├── user/             # 用户服务 (RPC & API)
-│   │   ├── chat/             # 对话服务 (RPC & API & WebSocket)
-│   │   ├── group/            # 群组服务 (RPC & API)
-│   │   ├── file/             # 文件服务 (API)
-│   │   ├── settings/         # 系统配置服务
-│   │   └── log/              # 日志服务 (Kafka Consumer)
-│   ├── protocol/             # Protobuf 编解码生成代码
-│   └── deploy/               # Docker-Compose, Prometheus, Jaeger 配置
-│
-├── clients/
-│   ├── desktop-web/          # Web 网页端 & Windows 桌面端 (统一工程)
-│   │   ├── src/              # 前端业务核心 (Vue 3 / React + Tailwind + Pinia)
-│   │   │   ├── components/   # 高质感组件 (聊天流/富文本/录音条/音视频通话)
-│   │   │   ├── protocol/     # Protobuf 二进制帧序列化工具
-│   │   │   └── stores/       # 客户端状态流
-│   │   ├── src-tauri/        # Tauri v2 (Rust 核心)
-│   │   │   ├── Cargo.toml    # Rust 依赖 (无任何 Electron 依赖)
-│   │   │   └── src/          # 托盘、系统通知、全局快捷键绑定、本地 SQLite
-│   │   └── package.json
-│   │
-│   └── android/              # Android 纯原生工程 (Kotlin + Compose)
-│       ├── app/
-│       │   ├── src/main/java/com/mim/im/
-│       │   │   ├── ui/       # Jetpack Compose UI (120Hz 丝滑流畅)
-│       │   │   ├── net/      # OkHttp / Ktor WebSocket + Protobuf 协议处理
-│       │   │   ├── service/  # 前台保活 Service 与通知推送
-│       │   │   └── rtc/      # WebRTC Native SDK 硬件加速音视频
-│       │   └── build.gradle.kts
-│       └── settings.gradle.kts
-```
+各微服务节点统一通过 `mim/pkg/metrics` 在 `/metrics` 路径对外输出标准 Prometheus 指标：
+
+| 指标名称 | 类型 | 标签 (Labels) | 业务含义 |
+| :--- | :--- | :--- | :--- |
+| `mim_gateway_online_connections` | Gauge | `platform` (web, android, desktop) | 当前网关活跃 WebSocket 长连接总数 |
+| `mim_chat_messages_received_total` | Counter | `conv_type`, `msg_type` | 客户端发送的上行消息计数 |
+| `mim_gateway_messages_pushed_total` | Counter | `conv_type` | 网关向下游客户端推送的消息计数 |
+| `mim_chat_delivery_ack_total` | Counter | `status` (delivered) | 客户端送达回执总数 (DELIVERED) |
+| `mim_chat_read_receipt_total` | Counter | `conv_type` (single, group) | 客户端已读回执总数 (READ) |
+| `mim_auth_kicked_users_total` | Counter | `platform` (web, android, desktop) | 同端设备互踢触发次数 |
+| `mim_chat_message_processing_duration_seconds`| Histogram| `operation` (send_message, gateway_send_msg)| 消息处理端到端耗时分布（P50, P90, P99） |
 
 ---
 
-## 6. 可观测性与运维指标 (APM & Benchmarks)
+## 7. 部署架构与启动指南
 
-1. **分布式链路追踪 (OpenTelemetry + Jaeger)**：
-   * 网关接收入站请求时，若无 `traceparent` 头则自动生成全局唯一 `TraceId`。
-   * 通过 gRPC Client/Server Interceptor 将 `TraceId` 透传至 `auth -> user -> chat -> group` 全链路。
-   * Kafka 消息携带 `TraceId`，异步日志消费时无缝串联入库。
-2. **Prometheus 指标埋点**：
-   * `mim_ws_online_connections`: 当前活跃 WebSocket 连接数（按客户端平台打标签：`web/windows/android`）。
-   * `mim_messages_delivered_total`: 消息投递总数计数器（按消息类型区分）。
-   * `mim_message_delivery_latency_seconds`: 消息从发送端到接收端端到端时延直方图（重点监控 P95 < 50ms, P99 < 100ms）。
+### 7.1 单体极简模式启动 (Monolith Mode)
+适合快速验证、本地测试与边缘设备部署：
+```bash
+# 1. 编译单体服务
+cd backend && go build -o bin/server.exe ./cmd/server
+
+# 2. 启动服务 (默认使用 SQLite WAL 模式与本地降级路由)
+./bin/server.exe -port 8080 -db mim.db
+```
+
+### 7.2 分布式微服务集群一键部署 (Docker Compose)
+在项目根目录或 `backend/deploy/` 下执行：
+```bash
+cd backend/deploy
+docker-compose up -d
+```
+一键拉起全套组件：
+* `mysql`: MySQL 8 关系数据库 (端口 `3306`)
+* `redis`: Redis 7 缓存与分布式时序 (端口 `6379`)
+* `etcd`: Etcd v3 注册发现中心 (端口 `2379`)
+* `kafka`: KRaft 模式消息削峰管道 (端口 `9092`)
+* `mim-logic`: 业务逻辑微服务 (gRPC 端口 `9091`)
+* `mim-gateway`: WebSocket 接入网关 (WS 端口 `8081`, gRPC 端口 `9092`)
+* `mim-transfer`: 异步推送流转服务
+* `prometheus`: 指标监控中心 (端口 `9090`)
+
+### 7.3 分布式微服务手动多进程启动
+```bash
+# 1. 启动业务逻辑服务
+./bin/logic.exe -port 9091 -db-driver mysql -db "root:root@tcp(127.0.0.1:3306)/mim?charset=utf8mb4&parseTime=True&loc=Local" -redis-addr 127.0.0.1:6379 -etcd-addr 127.0.0.1:2379 -kafka-brokers 127.0.0.1:9092
+
+# 2. 启动异步推送服务
+./bin/transfer.exe -kafka-brokers 127.0.0.1:9092 -etcd-addr 127.0.0.1:2379 -redis-addr 127.0.0.1:6379
+
+# 3. 启动接入网关 (可横向扩展多个实例)
+./bin/gateway.exe -port 8081 -grpc-port 9092 -node-id gateway-1 -etcd-addr 127.0.0.1:2379 -redis-addr 127.0.0.1:6379
+```
