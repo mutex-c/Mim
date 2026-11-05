@@ -38,3 +38,5 @@ uploads/
 *.apk
 
 docs/
+
+release_*/
