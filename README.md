@@ -97,7 +97,7 @@ Mim/
 ├── clients/
 │   ├── desktop-web/          # Web & 桌面客户端 (Vue 3 + Vite + Tailwind + Tauri v2)
 │   └── android/              # Android 原生客户端 (Jetpack Compose + Kotlin 协程)
-└── docs/                     # 设计文档、协议定义与压测报告
+└── scripts/                  # 集群冒烟验证与自动化测试脚本
 ```
 
 ---

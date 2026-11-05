@@ -36,3 +36,5 @@ uploads/
 **/clients/android/local.properties
 **/clients/android/.idea/
 *.apk
+
+docs/
