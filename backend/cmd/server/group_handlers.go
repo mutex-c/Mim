@@ -38,6 +38,13 @@ func (s *Server) handleGroupInfo(w http.ResponseWriter, r *http.Request, userID 
 		s.jsonError(w, http.StatusNotFound, "Group not found")
 		return
 	}
+	if grp.IsSearchable == 0 {
+		var myMember models.GroupMember
+		if err := s.db.Where("group_id = ? AND user_id = ?", grpID, userID).First(&myMember).Error; err != nil {
+			s.jsonError(w, http.StatusForbidden, "You are not a member of this private group")
+			return
+		}
+	}
 	s.jsonResponse(w, grp)
 }
 
@@ -46,6 +53,12 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request, user
 	grpID, _ := strconv.ParseUint(grpIDStr, 10, 64)
 	if grpID == 0 {
 		s.jsonError(w, http.StatusBadRequest, "group_id is required")
+		return
+	}
+
+	var myMember models.GroupMember
+	if err := s.db.Where("group_id = ? AND user_id = ?", grpID, userID).First(&myMember).Error; err != nil {
+		s.jsonError(w, http.StatusForbidden, "You are not a member of this group")
 		return
 	}
 

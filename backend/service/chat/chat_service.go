@@ -121,12 +121,45 @@ func (s *Service) SendMessage(req *SendMessageReq) (*protocol.MessageAck, error)
 		}, nil
 	}
 
-	// 2. Determine conversation ID
+	// 2. Determine conversation ID & verify group permissions
 	convID := ""
 	if req.ConvType == models.ConvTypeSingle {
 		convID = FormatSingleConvID(req.SenderID, req.ReceiverID)
 	} else {
 		convID = fmt.Sprintf("group_%d", req.GroupID)
+		// Check if sender is in the group
+		var member models.GroupMember
+		if err := s.db.Where("group_id = ? AND user_id = ?", req.GroupID, req.SenderID).First(&member).Error; err != nil {
+			return &protocol.MessageAck{
+				ClientMsgId: req.ClientMsgID,
+				Code:        403,
+				ErrorMsg:    "您不是该群成员，无法发送消息",
+				ServerTime:  time.Now().UnixMilli(),
+			}, errors.New("user is not in this group")
+		}
+
+		// Check muting
+		var grp models.Group
+		if err := s.db.First(&grp, req.GroupID).Error; err == nil {
+			if member.Role != models.GroupRoleOwner && member.Role != models.GroupRoleAdmin {
+				if grp.IsAllMuted == 1 {
+					return &protocol.MessageAck{
+						ClientMsgId: req.ClientMsgID,
+						Code:        403,
+						ErrorMsg:    "当前群聊已开启全员禁言",
+						ServerTime:  time.Now().UnixMilli(),
+					}, errors.New("group is all muted")
+				}
+				if member.MutedUntil != nil && time.Now().Before(*member.MutedUntil) {
+					return &protocol.MessageAck{
+						ClientMsgId: req.ClientMsgID,
+						Code:        403,
+						ErrorMsg:    "您已被禁言，无法发送消息",
+						ServerTime:  time.Now().UnixMilli(),
+					}, errors.New("member is muted")
+				}
+			}
+		}
 	}
 
 	// 3. Allocate Monotonic SeqId

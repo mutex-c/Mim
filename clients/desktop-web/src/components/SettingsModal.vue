@@ -331,7 +331,7 @@
 
             <!-- Conditional Question / Answer Fields -->
             <div
-              v-if="permForm.verifyMode === 4 || permForm.verifyMode === 5"
+              v-if="permForm.verifyMode === 3"
               class="mt-3 p-3.5 rounded-xl bg-black/[0.03] dark:bg-white/[0.04] border border-black/5 dark:border-white/5 space-y-3"
             >
               <div>
@@ -345,14 +345,14 @@
                   class="mim-input w-full h-8 px-3 rounded-lg bg-black/5 dark:bg-white/5 text-xs text-mim-light-text dark:text-mim-dark-text"
                 />
               </div>
-              <div v-if="permForm.verifyMode === 5">
+              <div>
                 <label class="block text-xs font-semibold text-mim-light-text dark:text-mim-dark-text mb-1">
-                  {{ langStore.t('settings.verifyAnswerLabel') }}
+                  {{ langStore.t('settings.verifyAnswerLabel') }} (选填)
                 </label>
                 <input
                   v-model="permForm.answer"
                   type="text"
-                  placeholder="设定标准正确答案（申请人必须完全匹配）"
+                  placeholder="留空则由您审核；设定后申请人答案必须完全一致才可通过"
                   class="mim-input w-full h-8 px-3 rounded-lg bg-black/5 dark:bg-white/5 text-xs text-mim-light-text dark:text-mim-dark-text"
                 />
               </div>
@@ -833,30 +833,25 @@ const searchModeOptions = computed(() => [
 
 const verifyModeOptions = computed(() => [
   {
-    value: 1,
+    value: 4,
     label: langStore.t('settings.verifyModeForbid'),
     desc: '拒绝任何人添加，系统将自动拦截所有好友申请',
   },
   {
-    value: 2,
+    value: 1,
     label: langStore.t('settings.verifyModeAllowAll'),
     desc: '开放模式，任何人发起申请无需确认直接成为好友',
   },
   {
-    value: 3,
+    value: 2,
     label: langStore.t('settings.verifyModeNeedMsg'),
     desc: '常规验证，申请人需附带验证说明信息，由您手动审核确认',
     badge: '默认推荐',
   },
   {
-    value: 4,
+    value: 3,
     label: langStore.t('settings.verifyModeNeedQuestion'),
-    desc: '问答验证，申请人需填写对预设问题的解答，由您审核内容',
-  },
-  {
-    value: 5,
-    label: langStore.t('settings.verifyModeNeedCorrect'),
-    desc: '精准问答，申请人必须输入与预设答案完全一致的内容才可通过',
+    desc: '问答验证，申请人需回答预设问题，可设定标准答案',
   },
 ]);
 
@@ -877,7 +872,7 @@ const pwdForm = ref({
 // Permissions Form (ui_perm.png)
 const permForm = ref({
   searchMode: 1, // 0: 不允许, 1: 账号, 2: 昵称
-  verifyMode: 3, // 1: 拒绝, 2: 允许, 3: 验证消息, 4: 问答, 5: 精确问答
+  verifyMode: 2, // 1: 允许, 2: 验证消息, 3: 问答, 4: 拒绝
   question: '',
   answer: '',
 });
@@ -961,6 +956,7 @@ const savePermissions = async () => {
     });
     const json = await res.json();
     if (json.code === 0) {
+      await chatStore.fetchUserProfile();
       showToast(langStore.t('settings.configSaved'));
     }
   } catch (_) {}
@@ -1132,7 +1128,7 @@ onMounted(async () => {
     } else {
       permForm.value.searchMode = 0;
     }
-    permForm.value.verifyMode = chatStore.userConfig.friend_verify_mode || 3;
+    permForm.value.verifyMode = chatStore.userConfig.friend_verify_mode || 2;
     permForm.value.question = chatStore.userConfig.friend_verify_question || '';
     permForm.value.answer = chatStore.userConfig.friend_verify_answer || '';
   }

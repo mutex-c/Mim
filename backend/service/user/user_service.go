@@ -2,6 +2,7 @@ package user
 
 import (
 	"errors"
+	"strings"
 	"fmt"
 	"time"
 
@@ -32,12 +33,14 @@ type UserProfileResp struct {
 }
 
 type UserSearchResult struct {
-	ID        uint64 `json:"id"`
-	Account   string `json:"account"`
-	Nickname  string `json:"nickname"`
-	Avatar    string `json:"avatar"`
-	Signature string `json:"signature"`
-	IsFriend  bool   `json:"is_friend"`
+	ID                   uint64 `json:"id"`
+	Account              string `json:"account"`
+	Nickname             string `json:"nickname"`
+	Avatar               string `json:"avatar"`
+	Signature            string `json:"signature"`
+	IsFriend             bool   `json:"is_friend"`
+	FriendVerifyMode     int8   `json:"friend_verify_mode"`
+	FriendVerifyQuestion string `json:"friend_verify_question"`
 }
 
 type FriendItem struct {
@@ -81,8 +84,25 @@ func (s *Service) UpdateProfile(userID uint64, nickname, avatar, signature strin
 
 // UpdateConfig updates privacy & anti-harassment configs
 func (s *Service) UpdateConfig(userID uint64, cfg *models.UserConfig) error {
-	cfg.UserID = userID
-	return s.db.Save(cfg).Error
+	var existing models.UserConfig
+	if err := s.db.Where("user_id = ?", userID).First(&existing).Error; err != nil {
+		cfg.UserID = userID
+		if cfg.RecallTimeLimit == 0 {
+			cfg.RecallTimeLimit = 120
+		}
+		return s.db.Create(cfg).Error
+	}
+	updates := map[string]interface{}{
+		"search_by_account":      cfg.SearchByAccount,
+		"search_by_nickname":     cfg.SearchByNickname,
+		"friend_verify_mode":     cfg.FriendVerifyMode,
+		"friend_verify_question": cfg.FriendVerifyQuestion,
+		"friend_verify_answer":   cfg.FriendVerifyAnswer,
+	}
+	if cfg.RecallTimeLimit > 0 {
+		updates["recall_time_limit"] = cfg.RecallTimeLimit
+	}
+	return s.db.Model(&existing).Updates(updates).Error
 }
 
 // SearchUser finds users by account or nickname (respecting privacy configs)
@@ -91,10 +111,18 @@ func (s *Service) SearchUser(keyword string, currentUserID uint64) ([]*UserSearc
 		return nil, nil
 	}
 
-	var users []models.User
+	type UserWithConfig struct {
+		models.User
+		FriendVerifyMode     int8   `gorm:"column:friend_verify_mode"`
+		FriendVerifyQuestion string `gorm:"column:friend_verify_question"`
+	}
+	var users []UserWithConfig
 	// Join with user_configs to respect privacy
 	err := s.db.Raw(`
-		SELECT u.* FROM mim_users u
+		SELECT u.*,
+		       COALESCE(c.friend_verify_mode, 2) AS friend_verify_mode,
+		       COALESCE(c.friend_verify_question, '') AS friend_verify_question
+		FROM mim_users u
 		LEFT JOIN mim_user_configs c ON u.id = c.user_id
 		WHERE u.id != ? AND u.status = 1 AND (
 			(u.account = ? AND (c.search_by_account IS NULL OR c.search_by_account = 1)) OR
@@ -113,12 +141,14 @@ func (s *Service) SearchUser(keyword string, currentUserID uint64) ([]*UserSearc
 		s.db.Model(&models.Friend{}).Where("user_id = ? AND friend_id = ?", currentUserID, u.ID).Count(&friendCount)
 
 		results = append(results, &UserSearchResult{
-			ID:        u.ID,
-			Account:   u.Account,
-			Nickname:  u.Nickname,
-			Avatar:    u.Avatar,
-			Signature: u.Signature,
-			IsFriend:  friendCount > 0,
+			ID:                   u.ID,
+			Account:              u.Account,
+			Nickname:             u.Nickname,
+			Avatar:               u.Avatar,
+			Signature:            u.Signature,
+			IsFriend:             friendCount > 0,
+			FriendVerifyMode:     u.FriendVerifyMode,
+			FriendVerifyQuestion: u.FriendVerifyQuestion,
 		})
 	}
 
@@ -236,6 +266,18 @@ func (s *Service) SendFriendRequest(senderID, receiverID uint64, verifyMsg strin
 				return s.establishFriendship(tx, senderID, receiverID)
 			})
 			return true, err
+		}
+		if receiverConfig.FriendVerifyMode == models.VerifyModeQuestion {
+			if receiverConfig.FriendVerifyAnswer != "" {
+				if strings.TrimSpace(verifyMsg) != strings.TrimSpace(receiverConfig.FriendVerifyAnswer) {
+					return false, errors.New("验证答案不正确")
+				}
+				// 正确回答问题直接通过
+				err := s.db.Transaction(func(tx *gorm.DB) error {
+					return s.establishFriendship(tx, senderID, receiverID)
+				})
+				return true, err
+			}
 		}
 	}
 

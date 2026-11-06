@@ -220,6 +220,28 @@ func (s *Service) InviteMembers(operatorID, groupID uint64, memberIDs []uint64) 
 		return ErrPermissionDenied
 	}
 
+	var grp models.Group
+	if err := s.db.First(&grp, groupID).Error; err != nil {
+		return ErrGroupNotFound
+	}
+
+	// Permission checks based on JoinMode
+	if grp.JoinMode == models.GroupJoinModeForbid {
+		return errors.New("该群已开启禁止加入")
+	}
+	if grp.JoinMode == models.GroupJoinModeVerify {
+		if opMember.Role != models.GroupRoleOwner && opMember.Role != models.GroupRoleAdmin {
+			return errors.New("该群开启了进群审批，仅管理员和群主可邀请新成员")
+		}
+	}
+
+	// Capacity check
+	var currentCount int64
+	s.db.Model(&models.GroupMember{}).Where("group_id = ?", groupID).Count(&currentCount)
+	if int32(currentCount)+int32(len(memberIDs)) > grp.MaxMembers {
+		return errors.New("群成员已达上限")
+	}
+
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		addedCount := 0
 		for _, uid := range memberIDs {

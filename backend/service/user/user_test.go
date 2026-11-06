@@ -85,4 +85,34 @@ func TestUserService(t *testing.T) {
 	if len(friendsAfterDelete) != 0 {
 		t.Errorf("expected 0 friends after delete, got %d", len(friendsAfterDelete))
 	}
+
+	// 4. Test Friend Verification Modes (RejectAll & Question)
+	// Case A: Reject All
+	_ = svc.UpdateConfig(u2.ID, &models.UserConfig{
+		FriendVerifyMode: models.VerifyModeRejectAll,
+	})
+	_, err = svc.SendFriendRequest(u1.ID, u2.ID, "Please add me")
+	if err == nil || err.Error() != "对方已开启拒绝添加好友" {
+		t.Fatalf("expected 对方已开启拒绝添加好友, got: %v", err)
+	}
+
+	// Case B: Question with wrong answer
+	_ = svc.UpdateConfig(u2.ID, &models.UserConfig{
+		FriendVerifyMode:   models.VerifyModeQuestion,
+		FriendVerifyAnswer: "42",
+	})
+	_, err = svc.SendFriendRequest(u1.ID, u2.ID, "wrong answer")
+	if err == nil || err.Error() != "验证答案不正确" {
+		t.Fatalf("expected 验证答案不正确, got: %v", err)
+	}
+
+	// Case C: Question with correct answer -> direct friendship
+	directAdded, err := svc.SendFriendRequest(u1.ID, u2.ID, " 42 ")
+	if err != nil || !directAdded {
+		t.Fatalf("expected direct add on correct answer, got directAdded=%v, err=%v", directAdded, err)
+	}
+	friendsAlice, _ := svc.GetFriendList(u1.ID)
+	if len(friendsAlice) != 1 || friendsAlice[0].FriendID != u2.ID {
+		t.Fatalf("expected Bob in Alice's friend list after correct answer")
+	}
 }

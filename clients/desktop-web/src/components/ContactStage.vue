@@ -280,6 +280,9 @@
             <div>
               <div class="text-sm font-medium">{{ u.nickname }}</div>
               <div class="text-xs text-mim-light-muted">@{{ u.account }} (ID: {{ u.id }})</div>
+              <div v-if="u.friend_verify_mode === 3 && u.friend_verify_question" class="text-[11px] text-mim-accent mt-0.5">
+                问答: {{ u.friend_verify_question }}
+              </div>
             </div>
             <div>
               <span v-if="u.id === chatStore.currentUserId" class="text-xs text-mim-light-muted px-2.5 py-1 bg-black/5 dark:bg-white/5 rounded">
@@ -287,6 +290,9 @@
               </span>
               <span v-else-if="friends.some(f => f.friend_id === u.id)" class="text-xs text-emerald-600 dark:text-emerald-400 px-2.5 py-1 bg-emerald-500/10 rounded font-medium">
                 已是好友
+              </span>
+              <span v-else-if="u.friend_verify_mode === 4" class="text-xs text-rose-500 px-2.5 py-1 bg-rose-500/10 rounded font-medium">
+                拒绝被添加
               </span>
               <button
                 v-else

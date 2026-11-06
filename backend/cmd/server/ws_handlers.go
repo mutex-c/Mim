@@ -268,6 +268,27 @@ func (s *Server) handleFrameWebRTC(client *chat.Client, frame *protocol.Frame) {
 
 	signal.FromUserId = client.UserID
 
+	// For call initiation (OFFER), verify that caller and callee are friends
+	if signal.SignalType == "OFFER" {
+		var count int64
+		s.db.Model(&models.Friend{}).Where("user_id = ? AND friend_id = ?", client.UserID, signal.ToUserId).Count(&count)
+		if count == 0 {
+			respSignal := protocol.WebRTCSignal{
+				CallId:     signal.CallId,
+				FromUserId: signal.ToUserId,
+				ToUserId:   client.UserID,
+				SignalType: "REJECT",
+				Data:       `{"reason":"对方不是您的好友，无法发起通话"}`,
+			}
+			replyPayload, _ := json.Marshal(&respSignal)
+			replyFrame := protocol.NewFrame(protocol.CmdWebRTCSignal, 0, protocol.FlagJSON, replyPayload)
+			if encoded, err := replyFrame.Encode(); err == nil {
+				client.Send(encoded)
+			}
+			return
+		}
+	}
+
 	// Relay signal to target peer
 	payload, _ := json.Marshal(&signal)
 	f := protocol.NewFrame(protocol.CmdWebRTCSignal, 0, protocol.FlagJSON, payload)
